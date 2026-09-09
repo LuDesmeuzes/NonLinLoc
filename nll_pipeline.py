@@ -5,7 +5,7 @@ Pipeline complet NLL pour toutes les tuiles générées par segment_from_zones.p
 
 Pour chaque tuile trouvée dans TUILES_DIR, le script enchaîne automatiquement :
 
-  Étape 1 — Projection AE + interpolation cartésienne (0.1 / 0.5 / 0.x km)
+  Étape 1 — Projection AE + interpolation cartésienne (0.5 km)
              Lit  : <tuile>/<tuile>_standard.csv   (ou _elevated.csv)
              Écrit: <tuile>/work/modele_projete.txt
 
@@ -15,36 +15,42 @@ Pour chaque tuile trouvée dans TUILES_DIR, le script enchaîne automatiquement 
 
   Étape 3 — Génération des fichiers NLL (.hdr + .buf)
              Lit  : <tuile>/work/modele_rectangle.txt
-             Écrit: <tuile>/nll/layer.P.mod.hdr
-                    <tuile>/nll/layer.P.mod.buf
-                    <tuile>/nll/layer.S.mod.hdr
-                    <tuile>/nll/layer.S.mod.buf
+             Écrit: <tuile>/nll/layer.P.mod.hdr  /  .buf
+                    <tuile>/nll/layer.S.mod.hdr  /  .buf
+
+  Étape 4 — Génération du fichier de topographie pour LOCTOPO_SURFACE
+             Télécharge le MNT SRTM1 (30 m) via srtm.py
+             Écrit: <tuile>/nll/topo.asc
+             Format : lon lat elev_m  (GMT grid2xyz ASCII)
+             Résolution configurable via TOPO_STEP_DEG
 
 Architecture finale dans le Finder :
   modeles_tuiles/
   ├── Z01_Ubaye/
-  │   ├── Z01_Ubaye_standard.csv       ← produit par segment_from_zones.py
-  │   ├── Z01_Ubaye_elevated.csv       ← produit par segment_from_zones.py
+  │   ├── Z01_Ubaye_standard.csv
+  │   ├── Z01_Ubaye_elevated.csv
   │   ├── README.txt
-  │   ├── work/                        ← fichiers intermédiaires (peuvent être supprimés)
+  │   ├── work/
   │   │   ├── modele_projete.txt
   │   │   └── modele_rectangle.txt
-  │   └── nll/                         ← fichiers prêts pour Grid2Time
-  │       ├── layer.P.mod.hdr
+  │   └── nll/
+  │       ├── layer.P.mod.hdr  ← vitesse P
   │       ├── layer.P.mod.buf
-  │       ├── layer.S.mod.hdr
-  │       └── layer.S.mod.buf
+  │       ├── layer.S.mod.hdr  ← vitesse S
+  │       ├── layer.S.mod.buf
+  │       └── topo.asc         ← topographie (LOCTOPO_SURFACE)
   ├── Z02_Belledonne/
   │   └── ...
-  └── recap_pipeline.csv               ← résumé de toutes les tuiles traitées
+  └── recap_pipeline.csv
 
-Le centre de projection AE (lon0, lat0) est lu automatiquement
-depuis le README.txt de chaque tuile (généré par segment_from_zones.py).
+Le centre de projection AE (lon0, lat0) et l'étendue géographique
+sont lus automatiquement depuis le README.txt de chaque tuile.
 
 Utilisation :
+    pip install srtm.py
     python nll_pipeline.py
 
-Adaptez uniquement le bloc "À ADAPTER" ci-dessous.
+Adapte uniquement le bloc "À ADAPTER" ci-dessous.
 """
 
 import numpy as np
@@ -68,15 +74,24 @@ USE_ELEVATED = True
 
 # Pas d'interpolation cartésienne (km) — doit être identique
 # à ce qui sera utilisé dans le fichier .in de NLL
-STEP_KM = 5
+STEP_KM = 1
 
 # Les vitesses dans les CSV sont-elles en m/s ?
-# True  → conversion m/s → km/s avant écriture NLLÒ
+# True  → conversion m/s → km/s avant écriture NLL
 # False → déjà en km/s
 VELOCITIES_IN_MS = True
 
 # Méthode d'interpolation scipy : "linear" (précis) ou "nearest" (plus rapide)
 INTERP_METHOD = "linear"
+
+# ── Topographie (étape 4) ──────────────────────────────────────
+# Générer le fichier topo.asc pour LOCTOPO_SURFACE ?
+GENERATE_TOPO = True
+
+# Résolution de la grille topo en degrés.
+# SRTM1 = 0.000278° (~30 m), valeur recommandée pour NLL : 0.005° (~500 m)
+# Une résolution trop fine ralentit NLL sans apport significatif.
+TOPO_STEP_DEG = 0.001
 
 # ═══════════════════════════════════════════════════════════════
 
@@ -110,6 +125,25 @@ def read_center_from_readme(readme_path):
             f"Vérifier que le README a bien été généré par segment_from_zones.py"
         )
     return float(lon_match.group(1)), float(lat_match.group(1))
+
+
+def read_bounds_from_readme(readme_path):
+    """
+    Extrait lon_min, lon_max, lat_min, lat_max depuis le README.txt.
+    Cherche les lignes :
+        Longitude : [6.0000°, 7.5000°]
+        Latitude  : [44.0000°, 45.0000°]
+    Retourne (lon_min, lon_max, lat_min, lat_max).
+    """
+    text = Path(readme_path).read_text(encoding="utf-8")
+    lon_match = re.search(r"Longitude\s*:\s*\[([\-\d.]+)°,\s*([\-\d.]+)°\]", text)
+    lat_match = re.search(r"Latitude\s*:\s*\[([\-\d.]+)°,\s*([\-\d.]+)°\]", text)
+    if not lon_match or not lat_match:
+        raise ValueError(
+            f"Impossible de lire les bornes géographiques dans {readme_path}"
+        )
+    return (float(lon_match.group(1)), float(lon_match.group(2)),
+            float(lat_match.group(1)), float(lat_match.group(2)))
 
 
 def find_input_csv(tuile_dir, use_elevated):
@@ -363,6 +397,130 @@ def step3_write_nll(in_path, nll_dir, lon0, lat0, step_km, vel_in_ms):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# ÉTAPE 4 — TOPOGRAPHIE POUR LOCTOPO_SURFACE
+# ─────────────────────────────────────────────────────────────────────────────
+
+def step4_generate_topo(nll_dir, lon_min, lon_max, lat_min, lat_max, step_deg):
+    """
+    Génère le fichier topo.asc au format exact attendu par NLL pour LOCTOPO_SURFACE.
+
+    NLL lit un fichier produit par les commandes GMT :
+        grdinfo topo.grd  > topo.grd.asc     ← en-tête de métadonnées
+        grd2xyz topo.grd -Z >> topo.grd.asc  ← valeurs Z seules, sans lon/lat
+
+    Structure du fichier produit :
+        ── En-tête (imite la sortie de grdinfo) ──────────────────────────────
+        topo.grd: Title: Topography
+        topo.grd: Command:
+        topo.grd: Remark:
+        topo.grd: Gridline node registration used
+        topo.grd: grd_type = Cartesian
+        topo.grd: x_min: <lon_min>  x_max: <lon_max>  x_inc: <step>  name: x  nx: <nx>
+        topo.grd: y_min: <lat_min>  y_max: <lat_max>  y_inc: <step>  name: y  ny: <ny>
+        topo.grd: z_min: <zmin>  z_max: <zmax>  name: z
+        topo.grd: node_offset = 0
+        ── Données Z (grd2xyz -Z, ordre TL = nord→sud, ouest→est) ───────────
+        <elev_m>
+        <elev_m>
+        ...
+
+    Coordonnées : lon et lat en degrés décimaux, élévation en mètres.
+    Ordre des données : ligne par ligne du nord (y_max) au sud (y_min),
+                        de gauche (x_min) à droite (x_max) — ordre GMT TL.
+
+    Paramètres
+    ----------
+    nll_dir   : Path — dossier de sortie (tuile/nll/)
+    lon_min/max, lat_min/max : float — étendue géographique de la tuile
+    step_deg  : float — résolution en degrés
+    """
+    try:
+        import srtm
+    except ImportError:
+        log("⚠ Package srtm.py non installé → pip install srtm.py", 2)
+        log("  Fichier topo.asc non généré.", 2)
+        return
+
+    # Grille lon/lat (axes)
+    lons = np.arange(lon_min, lon_max + step_deg * 0.5, step_deg)
+    lats = np.arange(lat_min, lat_max + step_deg * 0.5, step_deg)
+    nx, ny = len(lons), len(lats)
+
+    log(f"Téléchargement SRTM  [{lon_min:.3f},{lon_max:.3f}] × "
+        f"[{lat_min:.3f},{lat_max:.3f}]  "
+        f"step={step_deg}°  grille {nx}×{ny} …", 2)
+
+    # Récupération SRTM — ordre nord→sud (GMT TL) pour grd2xyz -Z
+    elev_data = srtm.get_data()
+    z_values  = []
+    n_missing = 0
+
+    for lat in lats[::-1]:          # nord → sud  (y_max en premier)
+        for lon in lons:            # ouest → est
+            elev = elev_data.get_elevation(lat, lon)
+            if elev is None:
+                z_values.append(np.nan)
+                n_missing += 1
+            else:
+                z_values.append(float(elev))
+
+    z_arr = np.array(z_values)
+
+    # Interpolation des NaN par plus proche voisin
+    if n_missing > 0:
+        log(f"  {n_missing} points sans donnée SRTM → interpolation voisin", 3)
+        # Coordonnées de tous les points (même ordre nord→sud)
+        coords = np.array([
+            (lon, lat)
+            for lat in lats[::-1]
+            for lon in lons
+        ])
+        valid   = ~np.isnan(z_arr)
+        invalid =  np.isnan(z_arr)
+        if valid.sum() > 0:
+            from scipy.spatial import cKDTree
+            tree = cKDTree(coords[valid])
+            _, idx = tree.query(coords[invalid])
+            z_arr[invalid] = z_arr[valid][idx]
+        else:
+            z_arr[:] = 0.0
+            log("  ⚠ Aucune donnée SRTM — élévation fixée à 0 m", 3)
+
+    z_min = float(np.nanmin(z_arr))
+    z_max = float(np.nanmax(z_arr))
+
+    # ── Écriture du fichier au format GMT grdinfo + grd2xyz -Z ────────────
+    out_path = nll_dir / "topo.asc"
+    with open(out_path, "w") as f:
+        # En-tête : imite exactement la sortie de grdinfo
+        f.write("topo.grd: Title: Topography\n")
+        f.write("topo.grd: Command:\n")
+        f.write("topo.grd: Remark:\n")
+        f.write("topo.grd: Gridline node registration used\n")
+        f.write("topo.grd: grd_type = Cartesian\n")
+        f.write(
+            f"topo.grd: x_min: {lon_min:.6f}  x_max: {lon_max:.6f}  "
+            f"x_inc: {step_deg:.6f}  name: x  nx: {nx}\n"
+        )
+        f.write(
+            f"topo.grd: y_min: {lat_min:.6f}  y_max: {lat_max:.6f}  "
+            f"y_inc: {step_deg:.6f}  name: y  ny: {ny}\n"
+        )
+        f.write(
+            f"topo.grd: z_min: {z_min:.4f}  z_max: {z_max:.4f}  name: z\n"
+        )
+        f.write("topo.grd: node_offset = 0\n")
+
+        # Données Z seules, une valeur par ligne (grd2xyz -Z)
+        for z in z_arr:
+            f.write(f"{z:.1f}\n")
+
+    log(f"✓ topo.asc  ({nx}×{ny}={nx*ny:,} pts  |  "
+        f"élev [{z_min:.0f}, {z_max:.0f}] m)", 2)
+    log(f"  → LOCTOPO_SURFACE {out_path.resolve()} 0", 2)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # PIPELINE PRINCIPAL
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -388,6 +546,7 @@ def run_pipeline():
     print(f"Dossier racine : {root.resolve()}")
     print(f"Fichier source : {'_elevated.csv' if USE_ELEVATED else '_standard.csv'}")
     print(f"Pas de grille  : {STEP_KM} km")
+    print(f"Topographie    : {'oui (step=' + str(TOPO_STEP_DEG) + '°)' if GENERATE_TOPO else 'non'}")
     print("=" * 60)
 
     summary = []
@@ -401,8 +560,12 @@ def run_pipeline():
         status = "OK"
         try:
             # ── Lecture du centre AE depuis README ────────────────────────
-            lon0, lat0 = read_center_from_readme(tuile_dir / "README.txt")
+            readme_path = tuile_dir / "README.txt"
+            lon0, lat0  = read_center_from_readme(readme_path)
+            lon_min, lon_max, lat_min, lat_max = read_bounds_from_readme(readme_path)
             log(f"Centre AE : lon0={lon0:.4f}°  lat0={lat0:.4f}°", 1)
+            log(f"Étendue   : lon [{lon_min:.3f},{lon_max:.3f}]  "
+                f"lat [{lat_min:.3f},{lat_max:.3f}]", 1)
 
             # ── Fichier CSV source ────────────────────────────────────────
             csv_path = find_input_csv(tuile_dir, USE_ELEVATED)
@@ -436,9 +599,19 @@ def run_pipeline():
                 rectangle_path, nll_dir, lon0, lat0, STEP_KM, VELOCITIES_IN_MS
             )
 
+            # ── Étape 4 ───────────────────────────────────────────────────
+            if GENERATE_TOPO:
+                print()
+                log("ÉTAPE 4 — Topographie SRTM (LOCTOPO_SURFACE)", 1)
+                step4_generate_topo(
+                    nll_dir, lon_min, lon_max, lat_min, lat_max, TOPO_STEP_DEG
+                )
+
             # ── Vérification finale ───────────────────────────────────────
             nll_files = list(nll_dir.glob("layer.*.mod.*"))
-            log(f"\n✅ {tag} — {len(nll_files)} fichiers NLL générés dans nll/", 1)
+            topo_ok   = (nll_dir / "topo.asc").exists()
+            log(f"\n✅ {tag} — {len(nll_files)} fichiers NLL"
+                f"{' + topo.asc' if topo_ok else ''} générés dans nll/", 1)
 
         except Exception as e:
             status = f"ERREUR : {e}"
