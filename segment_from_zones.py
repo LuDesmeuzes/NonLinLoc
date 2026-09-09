@@ -2,8 +2,7 @@
 segment_from_zones.py
 =====================
 Découpe un modèle de vitesse 3D global (LON, LAT, DEPTH, VP, VS)
-en tuiles dont les dimensions sont lues dans un fichier externe
-(Excel .xlsx, CSV ou TXT).
+en tuiles dont les dimensions sont lues dans config.yaml (segment.zones).
 
 Pour chaque tuile, le script crée un sous-dossier dédié et y place :
   - <nom>_standard.csv   : profondeur  0 → 100 km  (m → km converti)
@@ -20,10 +19,11 @@ Architecture de sortie générée automatiquement :
   │   └── ...
   └── recap_global.csv      ← tableau récapitulatif de toutes les tuiles
 
-Format du fichier de zones (Excel ou CSV) :
-  Colonnes obligatoires : numero | nom | lon_min | lon_max | lat_min | lat_max
-  Colonne optionnelle  : depth_max_km  (profondeur max en km, ex: 40)
-                         Si absente ou vide → pas de limite de profondeur.
+Format de segment.zones dans config.yaml :
+  Une entrée par tuile, avec les champs obligatoires
+  numero | nom | lon_min | lon_max | lat_min | lat_max
+  et le champ optionnel depth_max_km (profondeur max en km, ex: 40 ;
+  absent ou null → pas de limite de profondeur).
   Le centre de projection AE est calculé automatiquement
   comme le centre géographique de chaque tuile.
 
@@ -46,76 +46,55 @@ import pandas as pd
 from nll_common import load_config, log
 
 
-# ── 1. Chargement du fichier de zones ────────────────────────────────────────
+# ── 1. Chargement des zones (config.yaml → segment.zones) ───────────────────
 
-def load_zones(filepath):
+def load_zones(zones_config):
     """
-    Charge le fichier de définition des zones.
-    Accepte : .xlsx / .xls  (Excel)
-              .csv           (virgule ou point-virgule)
-              .txt           (tabulation ou espaces)
+    Valide et enrichit la liste de zones lue depuis config.yaml
+    (clé segment.zones).
 
-    Colonnes attendues (insensible à la casse) :
+    Champs attendus par zone :
         numero | nom | lon_min | lon_max | lat_min | lat_max | depth_max_km
 
-    Retourne une liste de dicts.
+    depth_max_km est optionnel (absent ou null → pas de limite de profondeur).
+
+    Retourne une liste de dicts (avec lon0/lat0 = centre de projection AE).
     """
-    filepath = Path(filepath)
-    ext = filepath.suffix.lower()
-
-    print(f"Chargement des zones depuis {filepath} …")
-
-    if ext in (".xlsx", ".xls"):
-        df = pd.read_excel(filepath, dtype=str)
-    elif ext == ".csv":
-        # Détection automatique du séparateur
-        raw = filepath.read_text(encoding="utf-8-sig")
-        sep = ";" if raw.count(";") > raw.count(",") else ","
-        df  = pd.read_csv(filepath, sep=sep, dtype=str)
-    else:
-        # .txt ou autre → tabulation puis espaces
-        try:
-            df = pd.read_csv(filepath, sep="\t", dtype=str)
-        except Exception:
-            df = pd.read_csv(filepath, sep=r"\s+", dtype=str, engine="python")
-
-    # Normalisation des noms de colonnes
-    df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
-
-    required = ["numero", "nom", "lon_min", "lon_max", "lat_min", "lat_max"]
-    missing  = [c for c in required if c not in df.columns]
-    if missing:
+    if not zones_config:
         raise ValueError(
-            f"Colonnes manquantes dans le fichier de zones : {missing}\n"
-            f"Colonnes trouvées : {list(df.columns)}\n"
-            f"Colonnes attendues : {required}"
+            "Aucune zone définie : renseigner segment.zones dans config.yaml "
+            "(voir config.example.yaml pour un exemple)."
         )
 
+    required = ["numero", "nom", "lon_min", "lon_max", "lat_min", "lat_max"]
     zones = []
-    for _, row in df.iterrows():
+    for i, raw in enumerate(zones_config, 1):
+        missing = [c for c in required if raw.get(c) is None]
+        if missing:
+            raise ValueError(
+                f"Zone #{i} incomplète dans config.yaml (segment.zones) : "
+                f"champs manquants {missing}\nZone reçue : {raw}"
+            )
         try:
             z = {
-                "numero"  : str(row["numero"]).strip(),
-                "nom"     : str(row["nom"]).strip(),
-                "lon_min" : float(row["lon_min"]),
-                "lon_max" : float(row["lon_max"]),
-                "lat_min" : float(row["lat_min"]),
-                "lat_max" : float(row["lat_max"]),
+                "numero"  : str(raw["numero"]).strip(),
+                "nom"     : str(raw["nom"]).strip(),
+                "lon_min" : float(raw["lon_min"]),
+                "lon_max" : float(raw["lon_max"]),
+                "lat_min" : float(raw["lat_min"]),
+                "lat_max" : float(raw["lat_max"]),
             }
-            # Profondeur maximale — optionnelle
-            if "depth_max_km" in df.columns:
-                val = str(row["depth_max_km"]).strip()
-                z["depth_max_km"] = float(val) if val not in ("", "nan", "None") else None
-            else:
-                z["depth_max_km"] = None
-            # Centre géographique = centre de projection AE
-            z["lon0"] = round((z["lon_min"] + z["lon_max"]) / 2, 6)
-            z["lat0"] = round((z["lat_min"] + z["lat_max"]) / 2, 6)
-            zones.append(z)
-        except (ValueError, KeyError) as e:
-            print(f"  ⚠ Ligne ignorée ({row.to_dict()}) : {e}")
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"Zone #{i} invalide dans config.yaml : {raw}\n{e}")
 
-    print(f"  {len(zones)} zones chargées")
+        depth_max_km = raw.get("depth_max_km")
+        z["depth_max_km"] = float(depth_max_km) if depth_max_km is not None else None
+        # Centre géographique = centre de projection AE
+        z["lon0"] = round((z["lon_min"] + z["lon_max"]) / 2, 6)
+        z["lat0"] = round((z["lat_min"] + z["lat_max"]) / 2, 6)
+        zones.append(z)
+
+    print(f"{len(zones)} zones chargées depuis config.yaml")
     for z in zones:
         depth_str = f"  prof max {z['depth_max_km']:.0f} km" if z["depth_max_km"] else ""
         print(f"    {z['numero']:>5}  {z['nom']:<20}  "
@@ -360,10 +339,10 @@ def main():
     seg    = config["segment"]
 
     print("=" * 55)
-    print("Segmentation NLL — pilotée par fichier de zones")
+    print("Segmentation NLL — pilotée par config.yaml")
     print("=" * 55)
 
-    zones     = load_zones(paths["zones_file"])
+    zones     = load_zones(seg.get("zones"))
     df_global = load_global_model(
         paths["model_file"], seg["model_sep"], seg["model_header"],
         seg["depth_in_meters"],

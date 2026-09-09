@@ -13,9 +13,6 @@ paths:
   # Fichier du modèle de vitesse global (LON LAT DEPTH VP VS)
   model_file: "/path/to/starter_pack_nll/04_modele de vitesse/wet_new.asc"
 
-  # Fichier de définition des zones/tuiles (.xlsx, .csv ou .txt)
-  zones_file: "./zones_modele.xlsx"
-
   # Dossier racine contenant/recevant les tuiles
   tuiles_dir: "/path/to/starter_pack_nll/01_tuiles"
 
@@ -37,6 +34,25 @@ segment:
 
   # Tolérance flottante pour la sélection géographique (degrés)
   tol: 0.001
+
+  # Définition des zones/tuiles à découper. Une entrée par tuile :
+  #   numero, nom, lon_min, lon_max, lat_min, lat_max : obligatoires
+  #   depth_max_km : optionnel (absent/null → pas de limite de profondeur)
+  # Le centre de projection AE est calculé automatiquement (centre géo de la zone).
+  zones:
+    - numero: 1
+      nom: ubaye_topo
+      lon_min: 6.11
+      lon_max: 7.39
+      lat_min: 44.06
+      lat_max: 44.96
+      depth_max_km: 30
+    # - numero: 2
+    #   nom: belledonne
+    #   lon_min: 5.8
+    #   lon_max: 6.4
+    #   lat_min: 45.1
+    #   lat_max: 45.6
 
 # ── Paramètres de nll_pipeline.py ───────────────────────────────────────────
 pipeline:

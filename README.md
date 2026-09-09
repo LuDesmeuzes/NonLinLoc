@@ -8,8 +8,8 @@ logiciel de localisation de séismes.
 ## Workflow
 
 ```
-<model_file>.asc                          <zones_file>.xlsx
-      (modèle global VP/VS)          (découpage en zones/tuiles)
+<model_file>.asc                          config.yaml
+      (modèle global VP/VS)          (segment.zones : découpage en tuiles)
                     \                      /
                      v                    v
               ┌───────────────────────────────┐
@@ -34,13 +34,14 @@ logiciel de localisation de séismes.
                        topo.asc
 ```
 
-`<model_file>`, `<zones_file>` et `<tuiles_dir>` sont les chemins que
-vous renseignez dans `config.yaml` (voir Configuration) — aucun chemin
-n'est imposé par le code.
+`<model_file>` et `<tuiles_dir>` sont les chemins que vous renseignez
+dans `config.yaml` (voir Configuration) — aucun chemin n'est imposé par
+le code.
 
 1. **`segment_from_zones.py`** — découpe le modèle global en tuiles
-   régionales (une par zone définie dans `zones_modele.xlsx`), avec
-   extension optionnelle en altitude pour couvrir la topographie.
+   régionales (une par zone définie dans `config.yaml`, clé
+   `segment.zones`), avec extension optionnelle en altitude pour
+   couvrir la topographie.
 2. **`nll_pipeline.py`** — pour chaque tuile : projection cartographique
    Azimuthal Equidistant, interpolation sur grille régulière, extraction
    du plus grand rectangle complet, écriture des fichiers binaires NLL
@@ -68,8 +69,10 @@ cp config.example.yaml config.yaml
 
 Puis éditer `config.yaml` pour renseigner :
 - `paths.model_file` : le fichier du modèle de vitesse global
-- `paths.zones_file` : le fichier de définition des zones (xlsx/csv/txt)
 - `paths.tuiles_dir` : le dossier où lire/écrire les tuiles
+- `segment.zones` : la liste des zones/tuiles à découper (une entrée par
+  tuile : `numero`, `nom`, `lon_min`, `lon_max`, `lat_min`, `lat_max`, et
+  optionnellement `depth_max_km`) — voir `config.example.yaml` pour un exemple
 
 ### Modèle de vitesse global
 
@@ -114,7 +117,7 @@ d'extraction du plus grand rectangle complet.
 ## Structure des fichiers
 
 ```
-02_scripts/
+NonLinLoc_ToolBox/
 ├── README.md                 ← ce fichier
 ├── requirements.txt          ← dépendances Python
 ├── config.example.yaml       ← modèle de configuration (versionné)
@@ -122,6 +125,5 @@ d'extraction du plus grand rectangle complet.
 ├── nll_common.py              ← code partagé (projection, config, README parsing)
 ├── segment_from_zones.py      ← étape 1 : découpage en tuiles
 ├── nll_pipeline.py            ← étape 2 : génération des fichiers NLL
-├── zones_modele.xlsx          ← définition des zones/tuiles
 └── tests/                     ← tests unitaires (pytest)
 ```
