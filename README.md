@@ -67,6 +67,17 @@ Puis éditer `config.yaml` pour renseigner :
 - `paths.zones_file` : le fichier de définition des zones (xlsx/csv/txt)
 - `paths.tuiles_dir` : le dossier où lire/écrire les tuiles
 
+### Modèle de vitesse global
+
+Le modèle de vitesse 3D global (`wet_new.asc`, colonnes LON/LAT/DEPTH/VP/VS)
+n'est **pas versionné** dans ce dépôt : à ~79 Mo, il alourdirait
+inutilement l'historique git pour un fichier de données propre à chaque
+poste de travail.
+
+À récupérer/placer manuellement (ex. `04_modele de vitesse/wet_new.asc`
+à la racine de `starter_pack_nll/`), puis renseigner son chemin dans
+`paths.model_file` (voir ci-dessus).
+
 `config.yaml` est spécifique à chaque machine et n'est **pas** versionné
 (voir `.gitignore`) ; `config.example.yaml` documente chaque champ et sert
 de modèle.
