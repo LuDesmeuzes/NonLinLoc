@@ -3,9 +3,9 @@ nll_pipeline.py
 ===============
 Pipeline complet NLL pour toutes les tuiles générées par segment_from_zones.py.
 
-Pour chaque tuile trouvée dans TUILES_DIR, le script enchaîne automatiquement :
+Pour chaque tuile trouvée dans tuiles_dir, le script enchaîne automatiquement :
 
-  Étape 1 — Projection AE + interpolation cartésienne (0.5 km)
+  Étape 1 — Projection AE + interpolation cartésienne
              Lit  : <tuile>/<tuile>_standard.csv   (ou _elevated.csv)
              Écrit: <tuile>/work/modele_projete.txt
 
@@ -21,11 +21,11 @@ Pour chaque tuile trouvée dans TUILES_DIR, le script enchaîne automatiquement 
   Étape 4 — Génération du fichier de topographie pour LOCTOPO_SURFACE
              Télécharge le MNT SRTM1 (30 m) via srtm.py
              Écrit: <tuile>/nll/topo.asc
-             Format : lon lat elev_m  (GMT grid2xyz ASCII)
-             Résolution configurable via TOPO_STEP_DEG
+             Format : imite exactement la sortie GMT (grdinfo + grd2xyz -Z)
+             attendue par NLL. Résolution configurable via topo_step_deg.
 
 Architecture finale dans le Finder :
-  modeles_tuiles/
+  tuiles_dir/
   ├── Z01_Ubaye/
   │   ├── Z01_Ubaye_standard.csv
   │   ├── Z01_Ubaye_elevated.csv
@@ -46,154 +46,40 @@ Architecture finale dans le Finder :
 Le centre de projection AE (lon0, lat0) et l'étendue géographique
 sont lus automatiquement depuis le README.txt de chaque tuile.
 
-Utilisation :
-    pip install srtm.py
-    python nll_pipeline.py
+Configuration :
+  Tous les paramètres (auparavant codés en dur) sont lus depuis un fichier
+  YAML — voir config.example.yaml pour le détail des champs.
 
-Adapte uniquement le bloc "À ADAPTER" ci-dessous.
+Utilisation :
+    pip install -r requirements.txt
+    cp config.example.yaml config.yaml   # une seule fois, puis adapter
+    python nll_pipeline.py
+    python nll_pipeline.py --config un_autre_config.yaml
 """
 
-import numpy as np
-import re
+import argparse
 import sys
 import traceback
 from pathlib import Path
+
+import numpy as np
+import pandas as pd
 from scipy.interpolate import griddata
 import csv as csv_module
-import pandas as pd
 
-# ═══════════════════════════════════════════════════════════════
-#  À ADAPTER
-# ═══════════════════════════════════════════════════════════════
-
-# Dossier racine contenant tous les sous-dossiers de tuiles
-TUILES_DIR = "/Users/desmeuzl/Documents/Boulot/starter_pack_nll/01_tuiles"
-
-# Utiliser le fichier _elevated.csv (True) ou _standard.csv (False) ?
-USE_ELEVATED = True
-
-# Pas d'interpolation cartésienne (km) — doit être identique
-# à ce qui sera utilisé dans le fichier .in de NLL
-STEP_KM = 1
-
-# Les vitesses dans les CSV sont-elles en m/s ?
-# True  → conversion m/s → km/s avant écriture NLL
-# False → déjà en km/s
-VELOCITIES_IN_MS = True
-
-# Méthode d'interpolation scipy : "linear" (précis) ou "nearest" (plus rapide)
-INTERP_METHOD = "linear"
-
-# ── Topographie (étape 4) ──────────────────────────────────────
-# Générer le fichier topo.asc pour LOCTOPO_SURFACE ?
-GENERATE_TOPO = True
-
-# Résolution de la grille topo en degrés.
-# SRTM1 = 0.000278° (~30 m), valeur recommandée pour NLL : 0.005° (~500 m)
-# Une résolution trop fine ralentit NLL sans apport significatif.
-TOPO_STEP_DEG = 0.001
-
-# ═══════════════════════════════════════════════════════════════
-
-EARTH_RADIUS_KM = 6371.0
-D2R = np.pi / 180.0
-R2D = 180.0 / np.pi
+from nll_common import (
+    AzimuthalEquidistant,
+    find_input_csv,
+    load_config,
+    log,
+    read_bounds_from_readme,
+    read_center_from_readme,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# UTILITAIRES
+# CHARGEMENT DU CSV DE TUILE
 # ─────────────────────────────────────────────────────────────────────────────
-
-def log(msg, indent=0):
-    print("  " * indent + msg, flush=True)
-
-
-def read_center_from_readme(readme_path):
-    """
-    Extrait lon0 et lat0 depuis le README.txt généré par segment_from_zones.py.
-    Cherche les lignes :
-        lon0 = 6.750000°
-        lat0 = 44.500000°
-    Retourne (lon0, lat0) ou lève ValueError si introuvable.
-    """
-    text = Path(readme_path).read_text(encoding="utf-8")
-    lon_match = re.search(r"lon0\s*=\s*([\-\d.]+)", text)
-    lat_match = re.search(r"lat0\s*=\s*([\-\d.]+)", text)
-    if not lon_match or not lat_match:
-        raise ValueError(
-            f"Impossible de lire lon0/lat0 dans {readme_path}\n"
-            f"Vérifier que le README a bien été généré par segment_from_zones.py"
-        )
-    return float(lon_match.group(1)), float(lat_match.group(1))
-
-
-def read_bounds_from_readme(readme_path):
-    """
-    Extrait lon_min, lon_max, lat_min, lat_max depuis le README.txt.
-    Cherche les lignes :
-        Longitude : [6.0000°, 7.5000°]
-        Latitude  : [44.0000°, 45.0000°]
-    Retourne (lon_min, lon_max, lat_min, lat_max).
-    """
-    text = Path(readme_path).read_text(encoding="utf-8")
-    lon_match = re.search(r"Longitude\s*:\s*\[([\-\d.]+)°,\s*([\-\d.]+)°\]", text)
-    lat_match = re.search(r"Latitude\s*:\s*\[([\-\d.]+)°,\s*([\-\d.]+)°\]", text)
-    if not lon_match or not lat_match:
-        raise ValueError(
-            f"Impossible de lire les bornes géographiques dans {readme_path}"
-        )
-    return (float(lon_match.group(1)), float(lon_match.group(2)),
-            float(lat_match.group(1)), float(lat_match.group(2)))
-
-
-def find_input_csv(tuile_dir, use_elevated):
-    """
-    Trouve le fichier _elevated.csv ou _standard.csv dans le dossier tuile.
-    Retourne le Path du fichier trouvé.
-    """
-    suffix = "_elevated.csv" if use_elevated else "_standard.csv"
-    candidates = list(Path(tuile_dir).glob(f"*{suffix}"))
-    if not candidates:
-        alt_suffix = "_standard.csv" if use_elevated else "_elevated.csv"
-        candidates = list(Path(tuile_dir).glob(f"*{alt_suffix}"))
-        if candidates:
-            log(f"⚠ Fichier {suffix} absent, utilisation de {alt_suffix}", 2)
-        else:
-            raise FileNotFoundError(
-                f"Aucun fichier CSV de modèle trouvé dans {tuile_dir}"
-            )
-    return candidates[0]
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ÉTAPE 1 — PROJECTION AE + INTERPOLATION
-# ─────────────────────────────────────────────────────────────────────────────
-
-class AzimuthalEquidistant:
-    def __init__(self, lon0, lat0, radius_km=EARTH_RADIUS_KM):
-        self.lon0  = lon0
-        self.lat0  = lat0
-        self.R     = radius_km
-        self._sinp = np.sin(lat0 * D2R)
-        self._cosp = np.cos(lat0 * D2R)
-
-    def forward(self, lon, lat):
-        lon = np.asarray(lon, dtype=float)
-        lat = np.asarray(lat, dtype=float)
-        dlon   = (lon - self.lon0 + 180.0) % 360.0 - 180.0
-        dlon_r = dlon * D2R
-        lat_r  = lat  * D2R
-        slat = np.sin(lat_r); clat = np.cos(lat_r); clon = np.cos(dlon_r)
-        cc = np.clip(self._sinp * slat + self._cosp * clat * clon, -1.0, 1.0)
-        at_center = np.abs(cc) >= 1.0
-        c     = np.where(at_center, 0.0, np.arccos(cc))
-        sin_c = np.sin(c)
-        k = np.where(at_center, self.R,
-                     self.R * c / np.where(sin_c == 0.0, 1.0, sin_c))
-        x = k * clat * np.sin(dlon_r)
-        y = k * (self._cosp * slat - self._sinp * clat * clon)
-        return x, y
-
 
 def load_csv_model(filepath):
     """Charge le CSV produit par segment_from_zones.py."""
@@ -212,6 +98,10 @@ def load_csv_model(filepath):
                 data[dst].append(float(row[src]))
     return {k: np.array(v) for k, v in data.items()}
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ÉTAPE 1 — PROJECTION AE + INTERPOLATION
+# ─────────────────────────────────────────────────────────────────────────────
 
 def step1_project_and_interpolate(csv_path, lon0, lat0, out_path, step_km, method):
     """Projection AE + interpolation 3D → modele_projete.txt"""
@@ -239,7 +129,6 @@ def step1_project_and_interpolate(csv_path, lon0, lat0, out_path, step_km, metho
     pts_src = np.column_stack([x_km, y_km, z_km])
     Xg, Yg, Zg = np.meshgrid(xa, ya, za, indexing="ij")
     pts_tgt = np.column_stack([Xg.ravel(), Yg.ravel(), Zg.ravel()])
-    shape   = (len(xa), len(ya), len(za))
 
     rows = []
     for param, vals in [("Vp", data["Vp"]), ("Vs", data["Vs"])]:
@@ -261,6 +150,27 @@ def step1_project_and_interpolate(csv_path, lon0, lat0, out_path, step_km, metho
 # ─────────────────────────────────────────────────────────────────────────────
 # ÉTAPE 2 — EXTRACTION DU PLUS GRAND RECTANGLE
 # ─────────────────────────────────────────────────────────────────────────────
+
+def largest_rect_histogram(h):
+    """
+    Algorithme classique "plus grand rectangle dans un histogramme".
+    h : liste/array de hauteurs.
+    Retourne (aire, indice_gauche, indice_droit) du meilleur rectangle.
+    """
+    stack = []; best = (0, 0, 0)
+    for j, hj in enumerate(h):
+        left = j
+        while stack and stack[-1][1] >= hj:
+            pj, ph = stack.pop()
+            a = ph * (j - pj)
+            if a > best[0]: best = (a, pj, j - 1)
+            left = pj
+        stack.append((left, hj))
+    for pj, ph in stack:
+        a = ph * (len(h) - pj)
+        if a > best[0]: best = (a, pj, len(h) - 1)
+    return best
+
 
 def step2_largest_rectangle(in_path, out_path, step_km):
     """Extrait la plus grande sous-grille rectangulaire complète."""
@@ -285,21 +195,6 @@ def step2_largest_rectangle(in_path, out_path, step_km):
         yi = round(round(row[1] / step_km) * step_km, 6)
         if xi in x_idx and yi in y_idx:
             present[x_idx[xi], y_idx[yi]] = True
-
-    def largest_rect_histogram(h):
-        stack = []; best = (0, 0, 0)
-        for j, hj in enumerate(h):
-            left = j
-            while stack and stack[-1][1] >= hj:
-                pj, ph = stack.pop()
-                a = ph * (j - pj)
-                if a > best[0]: best = (a, pj, j - 1)
-                left = pj
-            stack.append((left, hj))
-        for pj, ph in stack:
-            a = ph * (len(h) - pj)
-            if a > best[0]: best = (a, pj, len(h) - 1)
-        return best
 
     heights = np.zeros(ny, dtype=int)
     best    = (0, 0, 0, 0, 0)
@@ -524,8 +419,9 @@ def step4_generate_topo(nll_dir, lon_min, lon_max, lat_min, lat_max, step_deg):
 # PIPELINE PRINCIPAL
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run_pipeline():
-    root = Path(TUILES_DIR)
+def run_pipeline(tuiles_dir, use_elevated, step_km, velocities_in_ms,
+                  interp_method, generate_topo, topo_step_deg):
+    root = Path(tuiles_dir)
     if not root.exists():
         print(f"ERREUR : dossier introuvable : {root.resolve()}")
         sys.exit(1)
@@ -544,9 +440,9 @@ def run_pipeline():
     print("=" * 60)
     print(f"Pipeline NLL — {len(tuile_dirs)} tuile(s) détectée(s)")
     print(f"Dossier racine : {root.resolve()}")
-    print(f"Fichier source : {'_elevated.csv' if USE_ELEVATED else '_standard.csv'}")
-    print(f"Pas de grille  : {STEP_KM} km")
-    print(f"Topographie    : {'oui (step=' + str(TOPO_STEP_DEG) + '°)' if GENERATE_TOPO else 'non'}")
+    print(f"Fichier source : {'_elevated.csv' if use_elevated else '_standard.csv'}")
+    print(f"Pas de grille  : {step_km} km")
+    print(f"Topographie    : {'oui (step=' + str(topo_step_deg) + '°)' if generate_topo else 'non'}")
     print("=" * 60)
 
     summary = []
@@ -568,7 +464,7 @@ def run_pipeline():
                 f"lat [{lat_min:.3f},{lat_max:.3f}]", 1)
 
             # ── Fichier CSV source ────────────────────────────────────────
-            csv_path = find_input_csv(tuile_dir, USE_ELEVATED)
+            csv_path = find_input_csv(tuile_dir, use_elevated)
             log(f"Source    : {csv_path.name}", 1)
 
             # ── Création des dossiers de travail ──────────────────────────
@@ -584,27 +480,27 @@ def run_pipeline():
             print()
             log("ÉTAPE 1 — Projection AE + interpolation", 1)
             step1_project_and_interpolate(
-                csv_path, lon0, lat0, projete_path, STEP_KM, INTERP_METHOD
+                csv_path, lon0, lat0, projete_path, step_km, interp_method
             )
 
             # ── Étape 2 ───────────────────────────────────────────────────
             print()
             log("ÉTAPE 2 — Extraction du plus grand rectangle", 1)
-            step2_largest_rectangle(projete_path, rectangle_path, STEP_KM)
+            step2_largest_rectangle(projete_path, rectangle_path, step_km)
 
             # ── Étape 3 ───────────────────────────────────────────────────
             print()
             log("ÉTAPE 3 — Écriture des fichiers NLL", 1)
             step3_write_nll(
-                rectangle_path, nll_dir, lon0, lat0, STEP_KM, VELOCITIES_IN_MS
+                rectangle_path, nll_dir, lon0, lat0, step_km, velocities_in_ms
             )
 
             # ── Étape 4 ───────────────────────────────────────────────────
-            if GENERATE_TOPO:
+            if generate_topo:
                 print()
                 log("ÉTAPE 4 — Topographie SRTM (LOCTOPO_SURFACE)", 1)
                 step4_generate_topo(
-                    nll_dir, lon_min, lon_max, lat_min, lat_max, TOPO_STEP_DEG
+                    nll_dir, lon_min, lon_max, lat_min, lat_max, topo_step_deg
                 )
 
             # ── Vérification finale ───────────────────────────────────────
@@ -641,5 +537,33 @@ def run_pipeline():
     print("=" * 60)
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Pipeline NLL complet pour toutes les tuiles générées par segment_from_zones.py."
+    )
+    parser.add_argument(
+        "--config",
+        default=str(Path(__file__).resolve().parent / "config.yaml"),
+        help="Chemin vers le fichier de configuration YAML (défaut : config.yaml)",
+    )
+    return parser.parse_args()
+
+
+def main():
+    args   = parse_args()
+    config = load_config(args.config)
+    pipe   = config["pipeline"]
+
+    run_pipeline(
+        tuiles_dir=config["paths"]["tuiles_dir"],
+        use_elevated=pipe["use_elevated"],
+        step_km=pipe["step_km"],
+        velocities_in_ms=pipe["velocities_in_ms"],
+        interp_method=pipe["interp_method"],
+        generate_topo=pipe["generate_topo"],
+        topo_step_deg=pipe["topo_step_deg"],
+    )
+
+
 if __name__ == "__main__":
-    run_pipeline()
+    main()

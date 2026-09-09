@@ -1,0 +1,61 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Configuration du pipeline NLL
+#
+# Pour l'utiliser :
+#   cp config.example.yaml config.yaml
+#   puis adapter les chemins ci-dessous à votre machine.
+#
+# config.yaml n'est PAS versionné (voir .gitignore) car il contient des
+# chemins propres à chaque poste de travail.
+# ═══════════════════════════════════════════════════════════════════════════
+
+paths:
+  # Fichier du modèle de vitesse global (LON LAT DEPTH VP VS)
+  model_file: "/path/to/starter_pack_nll/04_modele de vitesse/wet_new.asc"
+
+  # Fichier de définition des zones/tuiles (.xlsx, .csv ou .txt)
+  zones_file: "./zones_modele.xlsx"
+
+  # Dossier racine contenant/recevant les tuiles
+  tuiles_dir: "/path/to/starter_pack_nll/01_tuiles"
+
+# ── Paramètres de segment_from_zones.py ─────────────────────────────────────
+segment:
+  # Séparateur du fichier modèle : "\s+" pour espaces/tabulations (.asc), "," pour CSV
+  model_sep: '\s+'
+
+  # Le fichier modèle a-t-il une ligne d'en-tête ?
+  model_header: true
+
+  # Profondeur en mètres dans le fichier modèle ? (true → conversion en km)
+  depth_in_meters: true
+
+  # Extension en altitude : nombre de km ajoutés au-dessus de la surface
+  # (couches de -elev_step_km à -elevation_km km), et pas entre les couches
+  elevation_km: 5
+  elev_step_km: 1
+
+  # Tolérance flottante pour la sélection géographique (degrés)
+  tol: 0.001
+
+# ── Paramètres de nll_pipeline.py ───────────────────────────────────────────
+pipeline:
+  # Utiliser le fichier _elevated.csv (true) ou _standard.csv (false) ?
+  use_elevated: true
+
+  # Pas d'interpolation cartésienne (km) — doit être identique à ce qui sera
+  # utilisé dans le fichier .in de NLL
+  step_km: 1
+
+  # Les vitesses des CSV sont-elles en m/s ? (true → conversion en km/s)
+  velocities_in_ms: true
+
+  # Méthode d'interpolation scipy : "linear" (précis) ou "nearest" (rapide)
+  interp_method: linear
+
+  # Générer le fichier topo.asc (LOCTOPO_SURFACE) à partir du MNT SRTM1 ?
+  generate_topo: true
+
+  # Résolution de la grille topo en degrés (SRTM1 natif ≈ 0.000278°/30 m ;
+  # 0.001-0.005° est un bon compromis pour NLL)
+  topo_step_deg: 0.001

@@ -1,8 +1,3 @@
-
-import numpy as np
-import pandas as pd
-from pathlib import Path
-
 """
 segment_from_zones.py
 =====================
@@ -16,7 +11,7 @@ Pour chaque tuile, le script crée un sous-dossier dédié et y place :
   - README.txt           : résumé de la tuile (coordonnées, centre AE, stats)
 
 Architecture de sortie générée automatiquement :
-  OUTPUT_DIR/
+  tuiles_dir/
   ├── Z01_Ubaye/
   │   ├── Z01_Ubaye_standard.csv
   │   ├── Z01_Ubaye_elevated.csv
@@ -32,43 +27,24 @@ Format du fichier de zones (Excel ou CSV) :
   Le centre de projection AE est calculé automatiquement
   comme le centre géographique de chaque tuile.
 
+Configuration :
+  Tous les chemins et paramètres (auparavant codés en dur) sont lus depuis
+  un fichier YAML — voir config.example.yaml pour le détail des champs.
+
 Utilisation :
+    cp config.example.yaml config.yaml   # une seule fois, puis adapter
     python segment_from_zones.py
+    python segment_from_zones.py --config un_autre_config.yaml
 """
 
-# ═══════════════════════════════════════════════════════════════
-#  À ADAPTER
-# ═══════════════════════════════════════════════════════════════
+import argparse
+from pathlib import Path
 
-# Fichier mère du modèle de vitesse global
-MODEL_FILE   = "/Users/desmeuzl/Documents/Boulot/starter_pack_nll/04_modele de vitesse/wet_new.asc"
+import numpy as np
+import pandas as pd
 
-# Fichier de définition des zones (Excel .xlsx, .csv ou .txt)
-ZONES_FILE   = "/Users/desmeuzl/Documents/Boulot/starter_pack_nll/02_scripts/zones_modele.xlsx"
+from nll_common import load_config, log
 
-# Dossier racine de sortie (créé automatiquement)
-OUTPUT_DIR   = "/Users/desmeuzl/Documents/Boulot/starter_pack_nll/01_tuiles"
-
-# ── Options du fichier modèle ──────────────────────────────────
-# Séparateur : r"\s+" pour espaces/tabulations (.asc), "," pour CSV
-MODEL_SEP    = r"\s+"
-
-# En-tête présente dans le fichier modèle ?
-MODEL_HEADER = True
-
-# Profondeur en mètres dans le fichier modèle ?
-# True → divise par 1000 pour obtenir des km
-DEPTH_IN_METERS = True
-
-# ── Options d'extension en altitude ───────────────────────────
-# Nombre de km à ajouter vers le haut (couches de -1 à -ELEVATION_KM km)
-ELEVATION_KM = 5
-ELEV_STEP_KM = 1
-
-# Tolérance flottante pour la sélection géographique (degrés)
-TOL = 0.001
-
-# ═══════════════════════════════════════════════════════════════
 
 # ── 1. Chargement du fichier de zones ────────────────────────────────────────
 
@@ -151,11 +127,11 @@ def load_zones(filepath):
 
 # ── 2. Chargement du modèle global ───────────────────────────────────────────
 
-def load_global_model(filepath, sep, has_header):
+def load_global_model(filepath, sep, has_header, depth_in_meters):
     """
     Charge le fichier .asc du modèle global.
     Colonnes : LON  LAT  DEPTH  VP  VS
-    Convertit la profondeur m → km si DEPTH_IN_METERS=True.
+    Convertit la profondeur m → km si depth_in_meters=True.
     """
     print(f"\nChargement du modèle global {filepath} …")
     if has_header:
@@ -184,7 +160,7 @@ def load_global_model(filepath, sep, has_header):
 
     df = df[required].astype(float)
 
-    if DEPTH_IN_METERS:
+    if depth_in_meters:
         df["depth"] = df["depth"] / 1000.0
         print(f"  Conversion profondeur : m → km")
 
@@ -221,7 +197,7 @@ def add_elevation_layers(df_tile, elevation_km, step_km):
 
 # ── 4. Écriture d'un README par tuile ────────────────────────────────────────
 
-def write_readme(folder, zone, n_std, n_elev, depth_range):
+def write_readme(folder, zone, n_std, n_elev, depth_range, elevation_km):
     """Écrit un fichier README.txt dans le dossier de la tuile."""
     depth_max_str = (f"{zone['depth_max_km']:.0f} km"
                      if zone["depth_max_km"] else "non limitée")
@@ -239,22 +215,20 @@ Profondeur maximale : {depth_max_str}
 
 Contenu
   standard.csv : {n_std:,} points  (profondeur {depth_range[0]:.0f} → {depth_range[1]:.0f} km)
-  elevated.csv : {n_elev:,} points (profondeur -{ELEVATION_KM} → {depth_range[1]:.0f} km)
+  elevated.csv : {n_elev:,} points (profondeur -{elevation_km} → {depth_range[1]:.0f} km)
 
 Workflow suivant
-  1. azeqdist_projection.py      (lon0={zone['lon0']:.4f}, lat0={zone['lat0']:.4f})
-  2. extract_largest_rectangle.py
-  3. write_nll_grid.py
+  python nll_pipeline.py
 """
     (folder / "README.txt").write_text(txt, encoding="utf-8")
 
 
 # ── 5. Traitement de toutes les tuiles ───────────────────────────────────────
 
-def process_all_zones(df_global, zones, root_dir):
+def process_all_zones(df_global, zones, root_dir, elevation_km, elev_step_km, tol):
     """
     Pour chaque zone :
-      - Crée  OUTPUT_DIR/<numero>_<nom>/
+      - Crée  tuiles_dir/<numero>_<nom>/
       - Extrait les points du modèle global
       - Écrit _standard.csv, _elevated.csv, README.txt
     Retourne la liste des résumés pour le récap global.
@@ -276,10 +250,10 @@ def process_all_zones(df_global, zones, root_dir):
 
         # ── Extraction géographique ───────────────────────────────────────
         mask = (
-            (df_global.lon   >= zone["lon_min"] - TOL) &
-            (df_global.lon   <= zone["lon_max"] + TOL) &
-            (df_global.lat   >= zone["lat_min"] - TOL) &
-            (df_global.lat   <= zone["lat_max"] + TOL)
+            (df_global.lon   >= zone["lon_min"] - tol) &
+            (df_global.lon   <= zone["lon_max"] + tol) &
+            (df_global.lat   >= zone["lat_min"] - tol) &
+            (df_global.lat   <= zone["lat_max"] + tol)
         )
         df_tile = df_global[mask].copy().reset_index(drop=True)
 
@@ -313,14 +287,14 @@ def process_all_zones(df_global, zones, root_dir):
         print(f"  ✓ {f_std.name}")
 
         # ── Fichier étendu ────────────────────────────────────────────────
-        df_elev = add_elevation_layers(df_tile, ELEVATION_KM, ELEV_STEP_KM)
+        df_elev = add_elevation_layers(df_tile, elevation_km, elev_step_km)
         n_elev  = len(df_elev)
         f_elev  = folder / f"{tag}_elevated.csv"
         df_elev.to_csv(f_elev, index=False, header=COL_NAMES)
         print(f"  ✓ {f_elev.name}  (+{n_elev - n_pts:,} pts d'altitude)")
 
         # ── README ────────────────────────────────────────────────────────
-        write_readme(folder, zone, n_pts, n_elev, depth_range)
+        write_readme(folder, zone, n_pts, n_elev, depth_range, elevation_km)
         print(f"  ✓ README.txt")
 
         summary.append({
@@ -343,7 +317,7 @@ def process_all_zones(df_global, zones, root_dir):
 # ── 6. Récapitulatif global ───────────────────────────────────────────────────
 
 def write_global_recap(summary, root_dir):
-    """Écrit OUTPUT_DIR/recap_global.csv avec toutes les infos des tuiles."""
+    """Écrit tuiles_dir/recap_global.csv avec toutes les infos des tuiles."""
     if not summary:
         return
     df = pd.DataFrame(summary)
@@ -367,15 +341,42 @@ def write_global_recap(summary, root_dir):
 
 # ── Programme principal ───────────────────────────────────────────────────────
 
-if __name__ == "__main__":
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Découpe un modèle de vitesse global en tuiles selon un fichier de zones."
+    )
+    parser.add_argument(
+        "--config",
+        default=str(Path(__file__).resolve().parent / "config.yaml"),
+        help="Chemin vers le fichier de configuration YAML (défaut : config.yaml)",
+    )
+    return parser.parse_args()
+
+
+def main():
+    args   = parse_args()
+    config = load_config(args.config)
+    paths  = config["paths"]
+    seg    = config["segment"]
+
     print("=" * 55)
     print("Segmentation NLL — pilotée par fichier de zones")
     print("=" * 55)
 
-    zones     = load_zones(ZONES_FILE)
-    df_global = load_global_model(MODEL_FILE, MODEL_SEP, MODEL_HEADER)
-    summary   = process_all_zones(df_global, zones, OUTPUT_DIR)
-    write_global_recap(summary, OUTPUT_DIR)
+    zones     = load_zones(paths["zones_file"])
+    df_global = load_global_model(
+        paths["model_file"], seg["model_sep"], seg["model_header"],
+        seg["depth_in_meters"],
+    )
+    summary   = process_all_zones(
+        df_global, zones, paths["tuiles_dir"],
+        seg["elevation_km"], seg["elev_step_km"], seg["tol"],
+    )
+    write_global_recap(summary, paths["tuiles_dir"])
 
     print("\nTerminé.")
     print("=" * 55)
+
+
+if __name__ == "__main__":
+    main()
