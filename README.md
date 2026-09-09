@@ -8,7 +8,7 @@ logiciel de localisation de séismes.
 ## Workflow
 
 ```
-04_modele de vitesse/wet_new.asc          zones_modele.xlsx
+<model_file>.asc                          <zones_file>.xlsx
       (modèle global VP/VS)          (découpage en zones/tuiles)
                     \                      /
                      v                    v
@@ -17,7 +17,7 @@ logiciel de localisation de séismes.
               └───────────────────────────────┘
                               │
                               v
-                     01_tuiles/<tuile>/
+                     <tuiles_dir>/<tuile>/
                        <tuile>_standard.csv
                        <tuile>_elevated.csv
                        README.txt
@@ -28,11 +28,15 @@ logiciel de localisation de séismes.
               └───────────────────────────────┘
                               │
                               v
-                     01_tuiles/<tuile>/nll/
+                     <tuiles_dir>/<tuile>/nll/
                        layer.P.mod.hdr / .buf
                        layer.S.mod.hdr / .buf
                        topo.asc
 ```
+
+`<model_file>`, `<zones_file>` et `<tuiles_dir>` sont les chemins que
+vous renseignez dans `config.yaml` (voir Configuration) — aucun chemin
+n'est imposé par le code.
 
 1. **`segment_from_zones.py`** — découpe le modèle global en tuiles
    régionales (une par zone définie dans `zones_modele.xlsx`), avec
@@ -69,14 +73,13 @@ Puis éditer `config.yaml` pour renseigner :
 
 ### Modèle de vitesse global
 
-Le modèle de vitesse 3D global (`wet_new.asc`, colonnes LON/LAT/DEPTH/VP/VS)
-n'est **pas versionné** dans ce dépôt : à ~79 Mo, il alourdirait
-inutilement l'historique git pour un fichier de données propre à chaque
-poste de travail.
+Le modèle de vitesse 3D global (colonnes LON/LAT/DEPTH/VP/VS, souvent
+plusieurs dizaines de Mo) n'est **pas versionné** dans ce dépôt : il
+alourdirait inutilement l'historique git pour un fichier de données
+propre à chaque projet/poste de travail.
 
-À récupérer/placer manuellement (ex. `04_modele de vitesse/wet_new.asc`
-à la racine de `starter_pack_nll/`), puis renseigner son chemin dans
-`paths.model_file` (voir ci-dessus).
+À placer où vous le souhaitez sur votre machine, puis renseigner son
+chemin dans `paths.model_file` (voir ci-dessus).
 
 `config.yaml` est spécifique à chaque machine et n'est **pas** versionné
 (voir `.gitignore`) ; `config.example.yaml` documente chaque champ et sert
