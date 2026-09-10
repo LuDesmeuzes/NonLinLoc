@@ -74,14 +74,9 @@ Puis éditer `config.yaml` pour renseigner :
   tuile : `numero`, `nom`, `lon_min`, `lon_max`, `lat_min`, `lat_max`, et
   optionnellement `depth_max_km`) — voir `config.example.yaml` pour un exemple
 
-### Modèle de vitesse global
+### Modèle de vitesse 3D de Jean Virieux et Nouibat Ahmed
 
-Le modèle de vitesse 3D global (colonnes LON/LAT/DEPTH/VP/VS, souvent
-plusieurs dizaines de Mo) n'est **pas versionné** dans ce dépôt : il
-alourdirait inutilement l'historique git pour un fichier de données
-propre à chaque projet/poste de travail.
-
-Pour vous le procurer, vous pouvez écrire à ludovic.desmeuzes@univ-grenoble-alpes.fr ou à mickael.langlais@univ-grenoble-alpes.fr. Ensuite, placer le où vous le souhaitez sur votre machine, puis renseigner son chemin dans `paths.model_file` (voir ci-dessus).
+Pour vous le procurer, vous pouvez écrire à ludovic.desmeuzes@univ-grenoble-alpes.fr ou à mickael.langlais@univ-grenoble-alpes.fr. Ensuite, placer le où vous le souhaitez sur votre machine, mais je vous conseille vivement de suivre les suggestions du modop pour un maximum de clarté, puis renseigner son chemin dans `paths.model_file` (voir ci-dessus).
 
 `config.yaml` est spécifique à chaque machine et n'est **pas** versionné
 (voir `.gitignore`) ; `config.example.yaml` documente chaque champ et sert
