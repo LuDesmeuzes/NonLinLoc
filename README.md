@@ -1,4 +1,4 @@
-# Pipeline NLL — préparation de modèles de vitesse sismique
+# Pipeline NLL — préparation des fichiers pour créer les TTT
 
 Ce dépôt contient deux scripts qui transforment un modèle de vitesse
 sismique 3D global (VP/VS en fonction de la longitude, latitude et
@@ -13,7 +13,7 @@ logiciel de localisation de séismes. Plus exactement, les scripts permettent de
                     \                      /
                      v                    v
               ┌───────────────────────────────┐
-              │     segment_from_zones.py      │
+              │     segment_from_zones.py     │
               └───────────────────────────────┘
                               │
                               v
@@ -24,7 +24,7 @@ logiciel de localisation de séismes. Plus exactement, les scripts permettent de
                               │
                               v
               ┌───────────────────────────────┐
-              │        nll_pipeline.py         │
+              │        nll_pipeline.py        │
               └───────────────────────────────┘
                               │
                               v
@@ -55,7 +55,7 @@ Le code partagé entre les deux scripts (projection, lecture des
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt 
+pip install -r requirements.txt # seulement la première fois sauf si changement dans le requirements.txt
 ```
 
 ## Configuration
@@ -81,8 +81,7 @@ plusieurs dizaines de Mo) n'est **pas versionné** dans ce dépôt : il
 alourdirait inutilement l'historique git pour un fichier de données
 propre à chaque projet/poste de travail.
 
-À placer où vous le souhaitez sur votre machine, puis renseigner son
-chemin dans `paths.model_file` (voir ci-dessus).
+Pour vous le procurer, vous pouvez écrire à ludovic.desmeuzes@univ-grenoble-alpes.fr ou à mickael.langlais@univ-grenoble-alpes.fr. Ensuite, placer le où vous le souhaitez sur votre machine, puis renseigner son chemin dans `paths.model_file` (voir ci-dessus).
 
 `config.yaml` est spécifique à chaque machine et n'est **pas** versionné
 (voir `.gitignore`) ; `config.example.yaml` documente chaque champ et sert
