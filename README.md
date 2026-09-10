@@ -3,7 +3,7 @@
 Ce dépôt contient deux scripts qui transforment un modèle de vitesse
 sismique 3D global (VP/VS en fonction de la longitude, latitude et
 profondeur) en fichiers prêts à l'emploi pour **NonLinLoc (NLL)**, un
-logiciel de localisation de séismes.
+logiciel de localisation de séismes. Plus exactement, les scripts permettent de préparer les fichiers nécessaires à la création des TTT avec Grid2Time (travel time tables, grilles de temps de trajet en fr), indispensable au fonctionnement de **NonLinLoc**. 
 
 ## Workflow
 
@@ -55,7 +55,7 @@ Le code partagé entre les deux scripts (projection, lecture des
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.txt 
 ```
 
 ## Configuration
