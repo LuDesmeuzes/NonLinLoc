@@ -28,7 +28,7 @@ logiciel de localisation de séismes. Plus exactement, les scripts permettent de
               └───────────────────────────────┘
                               │
                               v
-                     <tuiles_dir>/<tuile>/nll/
+                     <tuiles_dir>/<tuile>/model/
                        layer.P.mod.hdr / .buf
                        layer.S.mod.hdr / .buf
                        topo.asc

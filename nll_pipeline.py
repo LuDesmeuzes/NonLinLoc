@@ -15,12 +15,12 @@ Pour chaque tuile trouvée dans tuiles_dir, le script enchaîne automatiquement 
 
   Étape 3 — Génération des fichiers NLL (.hdr + .buf)
              Lit  : <tuile>/work/modele_rectangle.txt
-             Écrit: <tuile>/nll/layer.P.mod.hdr  /  .buf
-                    <tuile>/nll/layer.S.mod.hdr  /  .buf
+             Écrit: <tuile>/model/layer.P.mod.hdr  /  .buf
+                    <tuile>/model/layer.S.mod.hdr  /  .buf
 
   Étape 4 — Génération du fichier de topographie pour LOCTOPO_SURFACE
              Télécharge le MNT SRTM1 (30 m) via srtm.py
-             Écrit: <tuile>/nll/topo.asc
+             Écrit: <tuile>/model/topo.asc
              Format : imite exactement la sortie GMT (grdinfo + grd2xyz -Z)
              attendue par NLL. Résolution configurable via topo_step_deg.
 
@@ -33,7 +33,7 @@ Architecture finale dans le Finder :
   │   ├── work/
   │   │   ├── modele_projete.txt
   │   │   └── modele_rectangle.txt
-  │   └── nll/
+  │   └── model/
   │       ├── layer.P.mod.hdr  ← vitesse P
   │       ├── layer.P.mod.buf
   │       ├── layer.S.mod.hdr  ← vitesse S
@@ -325,7 +325,7 @@ def step4_generate_topo(nll_dir, lon_min, lon_max, lat_min, lat_max, step_deg):
 
     Paramètres
     ----------
-    nll_dir   : Path — dossier de sortie (tuile/nll/)
+    nll_dir   : Path — dossier de sortie (tuile/model/)
     lon_min/max, lat_min/max : float — étendue géographique de la tuile
     step_deg  : float — résolution en degrés
     """
@@ -469,7 +469,7 @@ def run_pipeline(tuiles_dir, use_elevated, step_km, velocities_in_ms,
 
             # ── Création des dossiers de travail ──────────────────────────
             work_dir = tuile_dir / "work"
-            nll_dir  = tuile_dir / "nll"
+            nll_dir  = tuile_dir / "model"
             work_dir.mkdir(exist_ok=True)
             nll_dir.mkdir(exist_ok=True)
 
@@ -507,7 +507,7 @@ def run_pipeline(tuiles_dir, use_elevated, step_km, velocities_in_ms,
             nll_files = list(nll_dir.glob("layer.*.mod.*"))
             topo_ok   = (nll_dir / "topo.asc").exists()
             log(f"\n✅ {tag} — {len(nll_files)} fichiers NLL"
-                f"{' + topo.asc' if topo_ok else ''} générés dans nll/", 1)
+                f"{' + topo.asc' if topo_ok else ''} générés dans model/", 1)
 
         except Exception as e:
             status = f"ERREUR : {e}"
