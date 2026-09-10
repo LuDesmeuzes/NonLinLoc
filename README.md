@@ -1,9 +1,7 @@
 # Pipeline NLL — préparation des fichiers pour créer les TTT
 
-Ce dépôt contient deux scripts qui transforment un modèle de vitesse
-sismique 3D global (VP/VS en fonction de la longitude, latitude et
-profondeur) en fichiers prêts à l'emploi pour **NonLinLoc (NLL)**, un
-logiciel de localisation de séismes. Plus exactement, les scripts permettent de préparer les fichiers nécessaires à la création des TTT avec Grid2Time (travel time tables, grilles de temps de trajet en fr), indispensable au fonctionnement de **NonLinLoc**. 
+Ce dépôt contient deux scripts qui transforment le modèle de vitesse 3D de Jean Virieux et Nouibat Ahmed (VP/VS en fonction de la longitude, latitude et
+profondeur) en fichiers prêts à l'emploi pour **NonLinLoc (NLL)**, une méthode de localisation 3D non linéaire de séisme. Plus exactement, les scripts permettent de préparer les fichiers nécessaires à la création des TTT avec Grid2Time (travel time tables, grilles de temps de trajet en fr), indispensable au fonctionnement de **NonLinLoc**. 
 
 ## Workflow
 
