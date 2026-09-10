@@ -47,7 +47,7 @@ Le centre de projection AE (lon0, lat0) et l'étendue géographique
 sont lus automatiquement depuis le README.txt de chaque tuile.
 
 Configuration :
-  Tous les paramètres (auparavant codés en dur) sont lus depuis un fichier
+  Tous les paramètres sont lus depuis un fichier
   YAML — voir config.example.yaml pour le détail des champs.
 
 Utilisation :

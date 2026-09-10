@@ -24,11 +24,11 @@ Format de segment.zones dans config.yaml :
   numero | nom | lon_min | lon_max | lat_min | lat_max
   et le champ optionnel depth_max_km (profondeur max en km, ex: 40 ;
   absent ou null → pas de limite de profondeur).
-  Le centre de projection AE est calculé automatiquement
+  Le centre de projection AE (Azimuthal Equidistant) est calculé automatiquement
   comme le centre géographique de chaque tuile.
 
 Configuration :
-  Tous les chemins et paramètres (auparavant codés en dur) sont lus depuis
+  Tous les chemins et paramètres sont lus depuis
   un fichier YAML — voir config.example.yaml pour le détail des champs.
 
 Utilisation :
