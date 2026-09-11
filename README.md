@@ -48,6 +48,20 @@ le code.
 Le code partagé entre les deux scripts (projection, lecture des
 `README.txt`, config) vit dans `nll_common.py`.
 
+## Documentation
+
+Le dossier `docs/` contient la documentation du workflow NLL complet,
+au-delà de ce que fait ce dépôt :
+- `Mise en place NLL sur Seiscomp.pdf` : tutoriel détaillant tout le
+  pipeline NonLinLoc — concepts clés (`TRANS`, modèle 1D vs 3D, grilles
+  `VGGRID`/`LOCGRID`), récupération du modèle de vitesse et des stations,
+  génération des grilles de temps de trajet (1D et 3D), puis mise en
+  place et utilisation de NLL sur SeisComP/OAR.
+- `vel2grid_grid2time.in.example` : fichier de contrôle NLL commenté et
+  généricisé, pour lancer `Vel2Grid` puis `Grid2Time` sur un modèle de
+  vitesse **1D** (cas non couvert par les scripts de ce dépôt, qui ne
+  traitent que le modèle 3D — voir le PDF pour le détail des paramètres).
+
 ## Installation
 
 ```bash
@@ -117,5 +131,6 @@ NonLinLoc_ToolBox/
 ├── nll_common.py              ← code partagé (projection, config, README parsing)
 ├── segment_from_zones.py      ← étape 1 : découpage en tuiles
 ├── nll_pipeline.py            ← étape 2 : génération des fichiers NLL
-└── tests/                     ← tests unitaires (pytest)
+├── tests/                     ← tests unitaires (pytest)
+└── docs/                      ← tutoriel NLL/SeisComP + exemples de fichiers .in
 ```

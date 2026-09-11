@@ -1,0 +1,76 @@
+# =============================================================================
+# Exemple de fichier de contrôle Vel2Grid + Grid2Time (modèle de vitesse 1D)
+#
+# Basé sur "Mise en place et utilisation de NLL sur SeisComP" (docs/).
+# NLL accepte un fichier .in par étape (vel2grid.in, grid2time.in) ou un
+# fichier unique concaténé comme ci-dessous — les deux fonctionnent.
+#
+# Remplacer toutes les valeurs en MAJUSCULES par celles de votre projet.
+# =============================================================================
+
+# ── Généralités (communes à Vel2Grid et Grid2Time) ──────────────────────────
+CONTROL 1 54321
+
+# TRANS doit être STRICTEMENT IDENTIQUE dans vel2grid.in, grid2time.in et
+# nlloc.in (ou NLL.<projet>.conf côté SeisComP).
+# Pour un réseau compact (< 100 km), TRANS SIMPLE suffit généralement.
+TRANS SIMPLE LATORIG LONGORIG 0.0
+
+# =============================================================================
+# Étape 1 — Vel2Grid : modèle de vitesse 1D -> grille de vitesse
+# =============================================================================
+
+# Ne pas créer de dossier "layer" : c'est un préfixe de nom de fichier,
+# pas un chemin de dossier à part entière.
+VGOUT ./model/layer
+
+VGTYPE P
+VGTYPE S
+
+# VGRID xNum yNum zNum xOrig yOrig zOrig dx dy dz gridType
+#   xNum = 2 : active le mode grille 2D radial (spécifique au 1D, cf docs/).
+#   yNum x dy doit couvrir la distance max station-événement attendue.
+#   zNum x dz doit couvrir la gamme de profondeurs attendue.
+#   Prévoir une petite marge plutôt qu'une grille trop juste.
+VGRID 2 YNUM ZNUM 0.0 0.0 ZORIG DY DZ SLOW_LEN
+
+# Modèle de vitesse 1D par couche :
+#   depth   : profondeur du haut de la couche (la couche la plus profonde
+#             s'étend jusqu'à l'infini)
+#   Vp_top / Vs_top : vitesses ondes P/S en haut de la couche, en km/s
+#   Vp_grad / Vs_grad / p_grad : gradients depuis le haut de la couche
+#                                 (0 = vitesse constante dans la couche)
+#   p_top   : densité en haut de la couche (ex: loi rho = Vp/1000*0.32+0.77)
+#LAYER depth Vp_top Vp_grad Vs_top Vs_grad p_top p_grad
+LAYER   0.0   5.30   0   3.01   0   2.46   0
+LAYER   3.0   5.60   0   3.18   0   2.61   0
+LAYER  27.0   6.20   0   3.52   0   2.75   0
+LAYER  35.0   6.90   0   3.92   0   2.98   0
+
+# Exécution :
+#   cd <dossier_du_projet>
+#   /chemin/vers/Vel2Grid vel2grid.in
+
+# =============================================================================
+# Étape 2 — Grid2Time : grille de vitesse -> grilles de temps de trajet
+# =============================================================================
+
+# GTFILES ttimeFileRoot outputFileRoot waveType
+#   Une ligne par phase (doit correspondre aux VGTYPE ci-dessus).
+GTFILES ./model/layer ./time/layer P
+GTFILES ./model/layer ./time/layer S
+
+# GTMODE GRID2D : cohérent avec xNum=2 de VGRID ci-dessus (mode 1D radial).
+# ANGLES_YES : nécessaire pour les mécanismes au foyer (sinon ANGLES_NO,
+# plus rapide).
+GTMODE GRID2D ANGLES_YES
+
+GT_PLFD 1.0e-3 2
+
+# Liste des stations au format GTSRCE (voir docs/), directement ou via
+# INCLUDE si elle est volumineuse.
+INCLUDE STATIONS_FILE
+
+# Exécution :
+#   cd <dossier_du_projet>
+#   /chemin/vers/Grid2Time grid2time.in
