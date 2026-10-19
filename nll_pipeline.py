@@ -295,6 +295,35 @@ def step3_write_nll(in_path, nll_dir, lon0, lat0, step_km, vel_in_ms):
 # ÉTAPE 4 — TOPOGRAPHIE POUR LOCTOPO_SURFACE
 # ─────────────────────────────────────────────────────────────────────────────
 
+def topo_header(lon_min, lon_max, lat_min, lat_max, step_deg, nx, ny, z_min, z_max):
+    """
+    En-tête du fichier topo.asc, au format de grdinfo de GMT 4.
+
+    NLL (velmod.c, read_grd) lit cet en-tête ligne par ligne, par position :
+      ligne 4 : 2e mot "Normal" → enregistrement aux nœuds (sinon : pixels,
+                et les altitudes sont lues avec un décalage d'une demi-maille)
+      ligne 5 : ignorée (ligne « grdfile format » de GMT 4)
+      ligne 9 : "scale_factor: <f> add_offset: <o>" → chaque altitude lue est
+                multipliée par f. Si cette ligne manque, f n'est pas
+                initialisé (souvent 0) et la topographie devient plate.
+    Les libellés de GMT 5/6 (« Gridline node registration », « node_offset »)
+    ne sont donc PAS compatibles.
+    """
+    return (
+        "topo.grd: Title: Topography\n"
+        "topo.grd: Command:\n"
+        "topo.grd: Remark:\n"
+        "topo.grd: Normal node registration used\n"
+        "topo.grd: grdfile format # 0\n"
+        f"topo.grd: x_min: {lon_min:.6f} x_max: {lon_max:.6f} "
+        f"x_inc: {step_deg:.6f} name: x nx: {nx}\n"
+        f"topo.grd: y_min: {lat_min:.6f} y_max: {lat_max:.6f} "
+        f"y_inc: {step_deg:.6f} name: y ny: {ny}\n"
+        f"topo.grd: z_min: {z_min:.4f} z_max: {z_max:.4f} name: z\n"
+        "topo.grd: scale_factor: 1 add_offset: 0\n"
+    )
+
+
 def step4_generate_topo(nll_dir, lon_min, lon_max, lat_min, lat_max, step_deg):
     """
     Génère le fichier topo.asc au format exact attendu par NLL pour LOCTOPO_SURFACE.
@@ -304,16 +333,16 @@ def step4_generate_topo(nll_dir, lon_min, lon_max, lat_min, lat_max, step_deg):
         grd2xyz topo.grd -Z >> topo.grd.asc  ← valeurs Z seules, sans lon/lat
 
     Structure du fichier produit :
-        ── En-tête (imite la sortie de grdinfo) ──────────────────────────────
+        ── En-tête (sortie de grdinfo de GMT 4, voir topo_header) ────────────
         topo.grd: Title: Topography
         topo.grd: Command:
         topo.grd: Remark:
-        topo.grd: Gridline node registration used
-        topo.grd: grd_type = Cartesian
-        topo.grd: x_min: <lon_min>  x_max: <lon_max>  x_inc: <step>  name: x  nx: <nx>
-        topo.grd: y_min: <lat_min>  y_max: <lat_max>  y_inc: <step>  name: y  ny: <ny>
-        topo.grd: z_min: <zmin>  z_max: <zmax>  name: z
-        topo.grd: node_offset = 0
+        topo.grd: Normal node registration used
+        topo.grd: grdfile format # 0
+        topo.grd: x_min: <lon_min> x_max: <lon_max> x_inc: <step> name: x nx: <nx>
+        topo.grd: y_min: <lat_min> y_max: <lat_max> y_inc: <step> name: y ny: <ny>
+        topo.grd: z_min: <zmin> z_max: <zmax> name: z
+        topo.grd: scale_factor: 1 add_offset: 0
         ── Données Z (grd2xyz -Z, ordre TL = nord→sud, ouest→est) ───────────
         <elev_m>
         <elev_m>
@@ -387,24 +416,8 @@ def step4_generate_topo(nll_dir, lon_min, lon_max, lat_min, lat_max, step_deg):
     # ── Écriture du fichier au format GMT grdinfo + grd2xyz -Z ────────────
     out_path = nll_dir / "topo.asc"
     with open(out_path, "w") as f:
-        # En-tête : imite exactement la sortie de grdinfo
-        f.write("topo.grd: Title: Topography\n")
-        f.write("topo.grd: Command:\n")
-        f.write("topo.grd: Remark:\n")
-        f.write("topo.grd: Gridline node registration used\n")
-        f.write("topo.grd: grd_type = Cartesian\n")
-        f.write(
-            f"topo.grd: x_min: {lon_min:.6f}  x_max: {lon_max:.6f}  "
-            f"x_inc: {step_deg:.6f}  name: x  nx: {nx}\n"
-        )
-        f.write(
-            f"topo.grd: y_min: {lat_min:.6f}  y_max: {lat_max:.6f}  "
-            f"y_inc: {step_deg:.6f}  name: y  ny: {ny}\n"
-        )
-        f.write(
-            f"topo.grd: z_min: {z_min:.4f}  z_max: {z_max:.4f}  name: z\n"
-        )
-        f.write("topo.grd: node_offset = 0\n")
+        f.write(topo_header(lon_min, lon_max, lat_min, lat_max, step_deg,
+                            nx, ny, z_min, z_max))
 
         # Données Z seules, une valeur par ligne (grd2xyz -Z)
         for z in z_arr:

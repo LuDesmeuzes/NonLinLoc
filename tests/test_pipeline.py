@@ -51,3 +51,19 @@ def test_step2_largest_rectangle_extracts_full_subgrid(tmp_path):
     assert len(result) >= 3
     extracted_xy = {(round(r[0], 4), round(r[1], 4)) for r in result}
     assert (1.0, 1.0) not in extracted_xy
+
+
+def test_topo_header_matches_nll_reader():
+    """
+    NLL (velmod.c, read_grd) lit l'en-tête par position : ligne 4 doit dire
+    "Normal" (enregistrement aux nœuds) et ligne 9 donner scale_factor, sinon
+    les altitudes sont multipliées par un facteur non initialisé.
+    """
+    from nll_pipeline import topo_header
+
+    lines = topo_header(6.11, 7.39, 44.06, 44.96, 0.001, 1281, 901, 269.0, 3943.0).splitlines()
+    assert len(lines) == 9
+    assert lines[3].split()[1] == "Normal"
+    assert lines[5].split()[-1] == "1281" and "x_inc: 0.001000" in lines[5]
+    assert lines[6].split()[-1] == "901"
+    assert lines[8] == "topo.grd: scale_factor: 1 add_offset: 0"
