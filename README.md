@@ -1,7 +1,12 @@
+## Documentation
+
+Le dossier `docs/` contient la documentation du workflow NLL complet, au-delà de ce que fait ce dépôt :
+- `Mise en place NLL sur Seiscomp.pdf` : tutoriel détaillant tout le pipeline NonLinLoc — concepts clés (`TRANS`, modèle 1D vs 3D, grilles `VGGRID`/`LOCGRID`), récupération du modèle de vitesse et des stations, génération des grilles de temps de trajet (1D et 3D), puis mise en place et utilisation de NLL sur SeisComP/OAR.
+- `vel2grid_grid2time.in.example` : fichier de contrôle NLL commenté pour lancer `Vel2Grid` puis `Grid2Time` sur un modèle de vitesse **1D** (cas non couvert par les scripts de ce dépôt, qui ne traitent que le modèle 3D — voir le PDF pour le détail des paramètres).
+
 # Pipeline NLL — préparation des fichiers pour créer les TTT
 
-Ce dépôt contient deux scripts qui transforment le modèle de vitesse 3D de Jean Virieux et Nouibat Ahmed (VP/VS en fonction de la longitude, latitude et
-profondeur) en fichiers prêts à l'emploi pour **NonLinLoc (NLL)**, une méthode de localisation 3D non linéaire de séisme. Plus exactement, les scripts permettent de préparer les fichiers nécessaires à la création des TTT avec Grid2Time (travel time tables, grilles de temps de trajet en fr), indispensable au fonctionnement de **NonLinLoc**. 
+Le reste de ce dépôt (en dehors de docs/) contient deux scripts qui transforment le modèle de vitesse 3D de Jean Virieux et Nouibat Ahmed (VP/VS en fonction de la longitude, latitude et profondeur) en fichiers prêts à l'emploi pour **NonLinLoc (NLL)**, une méthode de localisation 3D non linéaire de séisme. Plus exactement, les scripts permettent de préparer les fichiers nécessaires à la création des TTT avec Grid2Time (travel time tables, grilles de temps de trajet en fr), indispensable au fonctionnement de **NonLinLoc**. 
 
 ## Workflow
 
@@ -47,20 +52,6 @@ le code.
 
 Le code partagé entre les deux scripts (projection, lecture des
 `README.txt`, config) vit dans `nll_common.py`.
-
-## Documentation
-
-Le dossier `docs/` contient la documentation du workflow NLL complet,
-au-delà de ce que fait ce dépôt :
-- `Mise en place NLL sur Seiscomp.pdf` : tutoriel détaillant tout le
-  pipeline NonLinLoc — concepts clés (`TRANS`, modèle 1D vs 3D, grilles
-  `VGGRID`/`LOCGRID`), récupération du modèle de vitesse et des stations,
-  génération des grilles de temps de trajet (1D et 3D), puis mise en
-  place et utilisation de NLL sur SeisComP/OAR.
-- `vel2grid_grid2time.in.example` : fichier de contrôle NLL commenté et
-  généricisé, pour lancer `Vel2Grid` puis `Grid2Time` sur un modèle de
-  vitesse **1D** (cas non couvert par les scripts de ce dépôt, qui ne
-  traitent que le modèle 3D — voir le PDF pour le détail des paramètres).
 
 ## Installation
 

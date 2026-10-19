@@ -5,7 +5,9 @@
 # NLL accepte un fichier .in par étape (vel2grid.in, grid2time.in) ou un
 # fichier unique concaténé comme ci-dessous — les deux fonctionnent.
 #
-# Remplacer toutes les valeurs en MAJUSCULES par celles de votre projet.
+# Remplacer toutes les valeurs en "MAJUSCULES" par celles de votre projet. 
+# (Il faut aussi retirer les " "), je les ai laissé pour plus facilement différentier
+# les noms de variables des valeurs que vous devez modifier.
 # =============================================================================
 
 # ── Généralités (communes à Vel2Grid et Grid2Time) ──────────────────────────
@@ -14,7 +16,7 @@ CONTROL 1 54321
 # TRANS doit être STRICTEMENT IDENTIQUE dans vel2grid.in, grid2time.in et
 # nlloc.in (ou NLL.<projet>.conf côté SeisComP).
 # Pour un réseau compact (< 100 km), TRANS SIMPLE suffit généralement.
-TRANS SIMPLE LATORIG LONGORIG 0.0
+TRANS SIMPLE "LATORIG LONGORIG" 0.0
 
 # =============================================================================
 # Étape 1 — Vel2Grid : modèle de vitesse 1D -> grille de vitesse
@@ -22,7 +24,7 @@ TRANS SIMPLE LATORIG LONGORIG 0.0
 
 # Ne pas créer de dossier "layer" : c'est un préfixe de nom de fichier,
 # pas un chemin de dossier à part entière.
-VGOUT ./model/layer
+VGOUT ./model/layer # Vous pouvez aussi remplacer ce chemin par le chemin complet
 
 VGTYPE P
 VGTYPE S
@@ -32,7 +34,7 @@ VGTYPE S
 #   yNum x dy doit couvrir la distance max station-événement attendue.
 #   zNum x dz doit couvrir la gamme de profondeurs attendue.
 #   Prévoir une petite marge plutôt qu'une grille trop juste.
-VGRID 2 YNUM ZNUM 0.0 0.0 ZORIG DY DZ SLOW_LEN
+VGRID 2 "YNUM" "ZNUM" 0.0 0.0 "ZORIG" "DX" "DY" "DZ" SLOW_LEN
 
 # Modèle de vitesse 1D par couche :
 #   depth   : profondeur du haut de la couche (la couche la plus profonde
@@ -56,9 +58,13 @@ LAYER  35.0   6.90   0   3.92   0   2.98   0
 # =============================================================================
 
 # GTFILES ttimeFileRoot outputFileRoot waveType
-#   Une ligne par phase (doit correspondre aux VGTYPE ci-dessus).
+#   Une ligne par phase (doit correspondre aux VGTYPE ci-dessus) 
+#   ET SURTOUT à exécuter 2 fois le programme en alternant le commentaire 
+#   entre les deux lignes. GTFILES est un paramètre requiered et non-repeatable. 
+#   Il est obligatoire d’exécuter Grid2Time deux fois, une fois pour les phases P 
+#   et une fois pour les phases S.
 GTFILES ./model/layer ./time/layer P
-GTFILES ./model/layer ./time/layer S
+#GTFILES ./model/layer ./time/layer S
 
 # GTMODE GRID2D : cohérent avec xNum=2 de VGRID ci-dessus (mode 1D radial).
 # ANGLES_YES : nécessaire pour les mécanismes au foyer (sinon ANGLES_NO,
