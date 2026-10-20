@@ -67,3 +67,36 @@ def test_topo_header_matches_nll_reader():
     assert lines[5].split()[-1] == "1281" and "x_inc: 0.001000" in lines[5]
     assert lines[6].split()[-1] == "901"
     assert lines[8] == "topo.grd: scale_factor: 1 add_offset: 0"
+
+
+def test_seiscomp_xml_to_obs(tmp_path):
+    """Une arrivée utilisée → une ligne NLLOC_OBS ; l'arrivée non utilisée est ignorée."""
+    from seiscomp_xml_to_obs import obs_line, parse_event_xml
+
+    xml = tmp_path / "ev.xml"
+    xml.write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<seiscomp xmlns="http://geofon.gfz-potsdam.de/ns/seiscomp3-schema/0.13"><EventParameters>'
+        '<pick publicID="p1"><time><value>2023-05-14T06:25:18.5603Z</value></time>'
+        '<waveformID networkCode="FR" stationCode="CREF"/><phaseHint>Pg</phaseHint></pick>'
+        '<pick publicID="p2"><time><value>2023-05-14T06:25:23.7164Z</value>'
+        '<lowerUncertainty>0.1</lowerUncertainty><upperUncertainty>0.3</upperUncertainty></time>'
+        '<waveformID networkCode="FR" stationCode="JAUF"/><phaseHint>Sg</phaseHint></pick>'
+        '<pick publicID="p3"><time><value>2023-05-14T06:25:30.0Z</value></time>'
+        '<waveformID networkCode="FR" stationCode="SURF"/></pick>'
+        '<origin publicID="o1"><time><value>2023-05-14T06:25:16.7Z</value></time><methodID>LOCSAT</methodID>'
+        '<arrival><pickID>p1</pickID><phase>Pg</phase><timeUsed>true</timeUsed></arrival>'
+        '<arrival><pickID>p2</pickID><phase>Sg</phase><timeUsed>true</timeUsed></arrival>'
+        '<arrival><pickID>p3</pickID><phase>Pg</phase><timeUsed>false</timeUsed></arrival>'
+        '</origin></EventParameters></seiscomp>'
+    )
+    info, phases = parse_event_xml(xml)
+    assert info["method"] == "LOCSAT"
+    assert [p["station"] for p in phases] == ["CREF", "JAUF"]
+    assert phases[0]["error_s"] is None
+    assert phases[1]["error_s"] == pytest.approx(0.2)
+
+    line = obs_line(phases[0], 0.1).split()
+    assert line[0] == "CREF" and line[4] == "Pg"
+    assert line[6:9] == ["20230514", "0625", "18.5603"]
+    assert line[9:11] == ["GAU", "0.100"]

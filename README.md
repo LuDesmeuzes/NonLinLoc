@@ -95,6 +95,22 @@ python segment_from_zones.py
 python nll_pipeline.py
 ```
 
+### Pointés pour NLL en ligne de commande
+
+`seiscomp_xml_to_obs.py` convertit des exports XML SeisComP (un fichier par
+événement : origine passée à NLL, arrivées et pointés) en un fichier de
+pointés au format `NLLOC_OBS`. On peut ainsi relancer NLL en ligne de
+commande sur exactement les phases utilisées par SeisComP.
+
+```bash
+python seiscomp_xml_to_obs.py
+```
+
+Seules les arrivées utilisées (`timeUsed`) sont gardées. Les pointés sans
+incertitude dans le XML (pointés automatiques) reçoivent
+`phases.default_error_s`, à aligner sur `NonLinLoc.defaultPickError` de
+SeisComP. Les XML vides ou tronqués sont ignorés et listés à part.
+
 Un fichier de configuration alternatif peut être passé explicitement :
 
 ```bash
@@ -109,7 +125,8 @@ pytest tests/
 
 Les tests couvrent la projection Azimuthal Equidistant, le parsing des
 `README.txt`, le chargement de la configuration et l'algorithme
-d'extraction du plus grand rectangle complet.
+d'extraction du plus grand rectangle complet, l'en-tête de `topo.asc` et la
+conversion des XML SeisComP en pointés NLL.
 
 ## Structure des fichiers
 
@@ -122,6 +139,7 @@ NonLinLoc_ToolBox/
 ├── nll_common.py              ← code partagé (projection, config, README parsing)
 ├── segment_from_zones.py      ← étape 1 : découpage en tuiles
 ├── nll_pipeline.py            ← étape 2 : génération des fichiers NLL
+├── seiscomp_xml_to_obs.py     ← pointés SeisComP (XML) → NLLOC_OBS
 ├── tests/                     ← tests unitaires (pytest)
 └── docs/                      ← tutoriel NLL/SeisComP + exemples de fichiers .in
 ```
