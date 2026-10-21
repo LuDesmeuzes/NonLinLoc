@@ -186,6 +186,21 @@ def test_read_grid_control_and_model_bounds(tmp_path):
     assert not inside_model_grid(gc["model_root"], gc["trans"], 45.5585, 2.9121)
 
 
+def test_parse_phase_line():
+    """Ligne réelle du bloc PHASE d'un .hyp NLLoc 7."""
+    from nll_run import parse_phase_line
+
+    line = ("JAUF   ?    ?    ? S      ? 20240601 0338   10.7272 GAU  5.00e-02 -1.00e+00 "
+            "-1.00e+00 -1.00e+00 >    4.3940   -0.1787    0.8278   -0.0954   -9.0169   "
+            "-1.6410   12.2572 200.54 200.5 112.5  9     0.0000")
+    ph = parse_phase_line("ev1", line)
+    assert (ph["station"], ph["phase"], ph["event_id"]) == ("JAUF", "S", "ev1")
+    assert ph["time"] == "2024-06-01T03:38:10.727200"
+    assert ph["error_s"] == pytest.approx(0.05)
+    assert (ph["tt_pred_s"], ph["residual_s"], ph["weight"]) == (4.394, -0.1787, 0.8278)
+    assert (ph["dist_km"], ph["azimuth"], ph["ray_dip"]) == (12.2572, 200.54, 112.5)
+
+
 def test_split_obs_and_missing_grids(tmp_path):
     from nll_run import split_obs, stations_without_grid
 

@@ -28,6 +28,8 @@ Sorties (dans <run.runs_dir>/<nom>/) :
                          Event ID SeisComP), lues directement par LocQuality
   - evenements.csv     : événements de la période et origine de référence
   - run.yaml           : profil, période, paramètres de recherche, comptes
+  - phases.csv         : une ligne par phase des événements localisés (station,
+                         phase, résidu, poids, distance, azimut…)
   - nlloc_<k>.in, obs/, loc/ : fichiers de travail de NLLoc
 
 Configuration (sections run, fetch et phases de config.yaml) :
@@ -227,7 +229,9 @@ def control_file(profile_lines, obs_path, grid_root, loc_root, seed=159753):
     """Fichier de contrôle NLLoc : profil + LOCFILES / LOCHYPOUT de ce run."""
     return "\n".join([f"CONTROL 1 {seed}"] + profile_lines + [
         f"LOCFILES {obs_path} NLLOC_OBS {grid_root} {loc_root}",
-        "LOCHYPOUT SAVE_NLLOC_SUM",
+        # Un .hyp par événement (avec ses phases) en plus de la synthèse :
+        # extract_phases() en tire phases.csv puis les supprime
+        "LOCHYPOUT SAVE_NLLOC_ALL",
     ]) + "\n"
 
 
@@ -258,6 +262,55 @@ def merge_hyp(loc_dirs, out_path):
                 n_rejected += len(re.findall(r'^NLLOC .*"REJECTED"', text, re.M))
                 out.write(text)
     return n_located, n_rejected
+
+
+# Colonnes de phases.csv : celles d'une ligne du bloc PHASE d'un .hyp NLLoc,
+# avant « > » (pointé) puis après (calcul NLLoc)
+PHASE_COLUMNS = ["event_id", "station", "phase", "time", "error_s", "tt_pred_s",
+                 "residual_s", "weight", "dist_km", "azimuth", "ray_azimuth",
+                 "ray_dip", "tcorr_s"]
+
+
+def parse_phase_line(event_id, line):
+    """Une ligne du bloc PHASE → dict (colonnes PHASE_COLUMNS)."""
+    left, right = line.split(">", 1)
+    l, r = left.split(), right.split()
+    sec = float(l[8])
+    time = datetime.strptime(l[6] + l[7], "%Y%m%d%H%M") + timedelta(seconds=sec)
+    # Après « > » : TTpred Res Weight StaX StaY StaZ SDist SAzim RAz RDip RQual Tcorr …
+    return {"event_id": event_id, "station": l[0], "phase": l[4],
+            "time": time.isoformat(), "error_s": float(l[10]),
+            "tt_pred_s": float(r[0]), "residual_s": float(r[1]), "weight": float(r[2]),
+            "dist_km": float(r[6]), "azimuth": float(r[7]), "ray_azimuth": float(r[8]),
+            "ray_dip": float(r[9]), "tcorr_s": float(r[11])}
+
+
+def extract_phases(loc_dirs, out_csv):
+    """
+    Lit le bloc PHASE des .hyp par événement (localisés seulement) et écrit
+    out_csv (une ligne par phase), puis supprime les fichiers par événement
+    (.hyp, .hdr, .scat) et les last.* : la synthèse et phases.csv suffisent.
+    Renvoie le nombre de phases.
+    """
+    rows = []
+    for d in loc_dirs:
+        for hyp in sorted(Path(d).glob("*.grid0.loc.hyp")):
+            if ".sum." in hyp.name:
+                continue
+            text = hyp.read_text()
+            event = re.search(r"^PUBLIC_ID (\S+)", text, re.M)
+            if event and re.search(r'^NLLOC .*"LOCATED"', text, re.M):
+                block = re.search(r"^PHASE .*?\n(.*?)^END_PHASE", text, re.M | re.S)
+                if block:
+                    rows += [parse_phase_line(event.group(1), l)
+                             for l in block.group(1).splitlines() if ">" in l]
+        for f in Path(d).iterdir():
+            if (".sum." not in f.name and f.name.endswith((".grid0.loc.hyp", ".grid0.loc.hdr",
+                                                           ".grid0.loc.scat"))) \
+                    or f.name.startswith("last."):
+                f.unlink()
+    pd.DataFrame(rows, columns=PHASE_COLUMNS).to_csv(out_csv, index=False)
+    return len(rows)
 
 
 def parse_args():
@@ -360,6 +413,8 @@ def main():
     elapsed = (datetime.now() - start).total_seconds()
     n_located, n_rejected = merge_hyp(loc_dirs, run_dir / f"{name}.hyp")
     log(f"{n_located} localisés, {n_rejected} rejetés en {elapsed:.0f} s", 1)
+    n_phases = extract_phases(loc_dirs, run_dir / "phases.csv")
+    log(f"{n_phases} phases (résidus) → phases.csv", 1)
 
     meta = {
         "nom": name, "profil": args.profil,
@@ -372,6 +427,7 @@ def main():
         "pointes": str(obs_path),
         "erreur_pointe_defaut_s": config["phases"]["default_error_s"],
         "evenements": n_events, "localises": n_located, "rejetes": n_rejected,
+        "phases": n_phases,
         "duree_s": round(elapsed),
     }
     (run_dir / "run.yaml").write_text(yaml.safe_dump(meta, allow_unicode=True, sort_keys=False))
