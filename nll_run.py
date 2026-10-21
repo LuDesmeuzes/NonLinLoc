@@ -11,11 +11,17 @@ période, sans passer par le serveur SeisComP.
      LOCGRID, LOCSEARCH, LOCMETH… ; ${NLLROOT} est remplacé par
      run.profils_dir ; les grilles de temps sont celles de
      <profil>/time/<préfixe> ;
-  3. NLLoc en parallèle sur --jobs morceaux de la période ;
-  4. regroupement des localisations dans un seul fichier .hyp.
+  3. avec --grilles : grilles de temps manquantes calculées par Grid2Time
+     pour les stations pointées sur la période, à partir des lignes TRANS,
+     GTFILES, GTMODE et GT_PLFD de <profil>/nll_<profil>.in, avec les
+     positions de l'inventaire SeisComP (fdsnws-station) valides sur la
+     période ;
+  4. NLLoc en parallèle sur --jobs morceaux de la période ;
+  5. regroupement des localisations dans un seul fichier .hyp.
 
 Les stations des pointés sans grille de temps dans le profil sont signalées :
-NLLoc ignore leurs phases.
+NLLoc ignore leurs phases. Avec une grille 3D, les stations hors de la grille
+du modèle sont ignorées.
 
 Sorties (dans <run.runs_dir>/<nom>/) :
   - <nom>.hyp          : toutes les localisations (format NLLoc, PUBLIC_ID =
@@ -27,27 +33,33 @@ Sorties (dans <run.runs_dir>/<nom>/) :
 Configuration (sections run, fetch et phases de config.yaml) :
   run.profils_dir : dossier des profils (un sous-dossier par profil)
   run.runs_dir    : dossier où créer les runs
-  run.nlloc       : chemin du binaire NLLoc
+  run.nlloc       : chemin du binaire NLLoc (Grid2Time est cherché à côté)
+  fetch.fdsnws_station_url : service fdsnws-station (positions des stations)
 
 Utilisation :
     python nll_run.py --profil 1D_ubaye --debut 2024-11-01 --fin 2024-11-30
+    python nll_run.py --profil 05_ubaye_3D_topo --debut 2024-11-01 --fin 2024-11-30 --grilles
     python nll_run.py --profil 1D_ubaye --debut 2024-11-01 --fin 2024-11-30 \\
         --nom 1D_ubaye_local_test --jobs 6 \\
         --locsearch "OCT 15 15 15 0.001 50000 5000 0 1"
 """
 
 import argparse
+import io
 import os
 import re
 import shutil
 import subprocess
-from datetime import date, datetime
+import urllib.parse
+import urllib.request
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
+import pandas as pd
 import yaml
 
 from fetch_picks import fetch_period
-from nll_common import load_config, log
+from nll_common import AzimuthalEquidistant, load_config, log
 
 # Mots-clés gérés par nll_run.py, jamais recopiés depuis le .conf du profil
 MANAGED_KEYWORDS = {"CONTROL", "LOCFILES", "LOCHYPOUT"}
@@ -76,13 +88,108 @@ def keyword_values(lines, keyword):
     return None
 
 
-def time_grid_root(profile_dir):
-    """Racine des grilles de temps du profil, ex. <profil>/time/layer."""
+def read_grid_control(profile_dir, profils_dir):
+    """
+    Lignes de génération des grilles de <profil>/nll_<profil>.in : dict
+    trans, model_root, time_root (de GTFILES), gtmode, gt_plfd ; None si le
+    fichier n'existe pas.
+    """
+    path = Path(profile_dir) / f"nll_{Path(profile_dir).name}.in"
+    if not path.exists():
+        return None
+    lines = read_profile_conf(path, profils_dir)
+    gtfiles = keyword_values(lines, "GTFILES")
+    if not gtfiles:
+        return None
+    return {
+        "trans": " ".join(keyword_values(lines, "TRANS")),
+        "model_root": gtfiles[0], "time_root": gtfiles[1],
+        "gtmode": " ".join(keyword_values(lines, "GTMODE") or ["GRID3D", "ANGLES_YES"]),
+        "gt_plfd": " ".join(keyword_values(lines, "GT_PLFD") or ["1.0e-4", "1"]),
+    }
+
+
+def time_grid_root(profile_dir, grid_control=None):
+    """
+    Racine des grilles de temps du profil, ex. <profil>/time/layer : celle de
+    GTFILES dans nll_<profil>.in, sinon déduite des grilles présentes.
+    """
+    if grid_control:
+        return Path(grid_control["time_root"])
     hdrs = sorted((Path(profile_dir) / "time").glob("*.P.*.time.hdr"))
     if not hdrs:
         raise FileNotFoundError(f"Aucune grille de temps P dans {Path(profile_dir) / 'time'}")
     prefix = hdrs[0].name.split(".P.")[0]
     return Path(profile_dir) / "time" / prefix
+
+
+def station_coordinates(url, stations, debut, fin):
+    """
+    Positions des stations dans l'inventaire SeisComP (fdsnws-station),
+    valides sur la période : {code: (lat, lon, altitude_km)}. Une station
+    présente sous plusieurs réseaux garde la première ligne.
+    """
+    params = {"station": ",".join(sorted(stations)), "level": "station", "format": "text",
+              "starttime": debut.isoformat(), "endtime": (fin + timedelta(days=1)).isoformat()}
+    with urllib.request.urlopen(f"{url}?{urllib.parse.urlencode(params)}", timeout=120) as resp:
+        text = resp.read().decode() if resp.status != 204 else ""
+    if not text.strip():
+        return {}
+    inv = pd.read_csv(io.StringIO(text), sep="|")
+    inv.columns = [c.strip().lstrip("#") for c in inv.columns]
+    inv = inv.drop_duplicates("Station")
+    return {r.Station: (r.Latitude, r.Longitude, r.Elevation / 1000.0) for r in inv.itertuples()}
+
+
+def inside_model_grid(model_root, trans, lat, lon):
+    """Vrai si la station tombe dans l'emprise horizontale du modèle (grilles 3D)."""
+    head = Path(f"{model_root}.P.mod.hdr").read_text().split()
+    nx, ny = int(head[0]), int(head[1])
+    x0, y0, dx, dy = float(head[3]), float(head[4]), float(head[6]), float(head[7])
+    t = trans.split()
+    x, y = AzimuthalEquidistant(float(t[3]), float(t[2])).forward(lon, lat)
+    return x0 <= x <= x0 + (nx - 1) * dx and y0 <= y <= y0 + (ny - 1) * dy
+
+
+def make_time_grids(grid_control, missing, coords, grid2time, work_dir):
+    """
+    Lance Grid2Time pour les stations sans grille (missing : {phase: [codes]}),
+    une phase après l'autre (Grid2Time recopie le modèle dans le dossier des
+    grilles : deux processus en parallèle se marcheraient dessus).
+    Renvoie {phase: [stations ignorées (sans position ou hors grille)]}.
+    """
+    Path(grid_control["time_root"]).parent.mkdir(parents=True, exist_ok=True)
+    is_3d = "GRID3D" in grid_control["gtmode"]
+    skipped = {}
+    for phase, stations in missing.items():
+        ok, skipped[phase] = [], []
+        for s in stations:
+            pos = coords.get(s)
+            if pos is None or (is_3d and not inside_model_grid(
+                    grid_control["model_root"], grid_control["trans"], pos[0], pos[1])):
+                skipped[phase].append(s)
+            else:
+                ok.append(s)
+        if not ok:
+            continue
+        gtsrce = work_dir / f"gtsrce_{phase}.txt"
+        gtsrce.write_text("".join(f"GTSRCE {s} LATLON {coords[s][0]:.6f} {coords[s][1]:.6f} 0 "
+                                  f"{coords[s][2]:.3f}\n" for s in ok))
+        in_file = work_dir / f"grid2time_{phase}.in"
+        in_file.write_text("\n".join([
+            "CONTROL 1 159753",
+            f"TRANS {grid_control['trans']}",
+            f"GTFILES {grid_control['model_root']} {grid_control['time_root']} {phase}",
+            f"GTMODE {grid_control['gtmode']}",
+            f"INCLUDE {gtsrce}",
+            f"GT_PLFD {grid_control['gt_plfd']}",
+        ]) + "\n")
+        log(f"Grid2Time {phase} : {len(ok)} stations", 1)
+        with open(work_dir / f"grid2time_{phase}.log", "w") as out:
+            if subprocess.run([str(grid2time), str(in_file)], stdout=out,
+                              stderr=subprocess.STDOUT).returncode != 0:
+                raise RuntimeError(f"Grid2Time a échoué (voir {work_dir / f'grid2time_{phase}.log'})")
+    return skipped
 
 
 def stations_without_grid(obs_path, grid_root):
@@ -168,6 +275,8 @@ def parse_args():
     parser.add_argument("--locsearch", help="Remplace le LOCSEARCH du profil, ex. \"OCT 30 30 9 0.001 50000 5000 0 1\"")
     parser.add_argument("--refresh", action="store_true",
                         help="Retélécharger les pointés déjà en cache")
+    parser.add_argument("--grilles", action="store_true",
+                        help="Calculer (Grid2Time) les grilles de temps manquantes du profil")
     parser.add_argument("--force", action="store_true",
                         help="Écraser un run existant du même nom")
     parser.add_argument(
@@ -207,10 +316,30 @@ def main():
     topo = keyword_values(lines, "LOCTOPO_SURFACE")
     if topo and not Path(topo[0]).exists():
         raise SystemExit(f"Topographie du profil introuvable : {topo[0]}")
-    grid_root = time_grid_root(profile_dir)
+    grid_control = read_grid_control(profile_dir, profils_dir)
+    grid_root = time_grid_root(profile_dir, grid_control)
     log(f"LOCSEARCH {' '.join(keyword_values(lines, 'LOCSEARCH'))}", 1)
     log(f"grilles de temps : {grid_root}", 1)
-    for phase, stations in stations_without_grid(obs_path, grid_root).items():
+    missing = stations_without_grid(obs_path, grid_root)
+
+    if args.grilles and any(missing.values()):
+        if grid_control is None:
+            raise SystemExit(f"--grilles : pas de GTFILES dans {profile_dir / f'nll_{args.profil}.in'}")
+        log("Grilles de temps manquantes")
+        all_missing = set().union(*missing.values())
+        coords = station_coordinates(config["fetch"]["fdsnws_station_url"], all_missing,
+                                     args.debut, args.fin)
+        grid2time = Path(cfg["nlloc"]).with_name("Grid2Time")
+        start = datetime.now()
+        skipped = make_time_grids(grid_control, missing, coords, grid2time, run_dir)
+        log(f"grilles calculées en {(datetime.now() - start).total_seconds():.0f} s", 1)
+        for phase, stations in skipped.items():
+            if stations:
+                log(f"{phase} : {len(stations)} stations hors de la grille du modèle ou "
+                    f"absentes de l'inventaire", 1)
+        missing = stations_without_grid(obs_path, grid_root)
+
+    for phase, stations in missing.items():
         if stations:
             log(f"⚠ {len(stations)} stations sans grille {phase} (phases ignorées) : "
                 f"{', '.join(stations)}", 1)

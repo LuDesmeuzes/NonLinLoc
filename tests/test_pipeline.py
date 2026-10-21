@@ -162,6 +162,30 @@ def test_read_profile_conf(tmp_path):
     assert "LOCFILES obs.obs NLLOC_OBS time/layer loc/loc" in text
 
 
+def test_read_grid_control_and_model_bounds(tmp_path):
+    """Lignes Grid2Time lues dans nll_<profil>.in ; emprise du modèle 3D."""
+    from nll_run import inside_model_grid, read_grid_control, time_grid_root
+
+    profile = tmp_path / "profils" / "p3d"
+    (profile / "model").mkdir(parents=True)
+    (profile / "nll_p3d.in").write_text(
+        "CONTROL 1 159753\n"
+        "TRANS AZIMUTHAL_EQUIDIST WGS-84 44.505000 6.745000 0\n"
+        "GTFILES ${NLLROOT}/p3d/model/layer ${NLLROOT}/p3d/time/layer P   # commentaire\n"
+        "GTMODE GRID3D ANGLES_YES\n"
+    )
+    gc = read_grid_control(profile, tmp_path / "profils")
+    assert gc["model_root"] == str(tmp_path / "profils" / "p3d" / "model" / "layer")
+    assert gc["gtmode"] == "GRID3D ANGLES_YES" and gc["gt_plfd"] == "1.0e-4 1"
+    assert time_grid_root(profile, gc) == tmp_path / "profils" / "p3d" / "time" / "layer"
+
+    # Modèle de 20 x 20 km centré sur l'origine de TRANS
+    (profile / "model" / "layer.P.mod.hdr").write_text(
+        "41 41 10  -10.0 -10.0 -5.0  0.5 0.5 0.5  SLOW_LEN\n")
+    assert inside_model_grid(gc["model_root"], gc["trans"], 44.505, 6.745)
+    assert not inside_model_grid(gc["model_root"], gc["trans"], 45.5585, 2.9121)
+
+
 def test_split_obs_and_missing_grids(tmp_path):
     from nll_run import split_obs, stations_without_grid
 

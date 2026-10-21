@@ -95,6 +95,10 @@ fetch:
   # Service web fdsnws-event du serveur SeisComP
   fdsnws_url: "http://ist-sc3-sig.u-ga.fr:8080/fdsnws/event/1/query"
 
+  # Service web fdsnws-station du même serveur (inventaire : positions des
+  # stations, utilisées par nll_run.py --grilles)
+  fdsnws_station_url: "http://ist-sc3-sig.u-ga.fr:8080/fdsnws/station/1/query"
+
   # Zone des événements à récupérer (degrés). Celle-ci couvre les
   # événements du run SeisComP 1D_ubaye_v2.
   zone: {lat_min: 44.40, lat_max: 44.63, lon_min: 6.59, lon_max: 6.92}

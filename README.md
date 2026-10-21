@@ -124,6 +124,36 @@ Les stations des pointés sans grille de temps dans le profil sont signalées
 (NLLoc ignore leurs phases). Pour qu'un run local reproduise SeisComP, la
 copie locale `NLL.<profil>.conf` doit être à jour avec celle du serveur.
 
+**`--grilles`** calcule avant la localisation les grilles de temps
+manquantes (Grid2Time), pour les seules stations pointées sur la période.
+Les lignes `TRANS`, `GTFILES` (modèle et dossier des grilles), `GTMODE` et
+`GT_PLFD` sont lues dans `<profil>/nll_<profil>.in`. Les positions des
+stations viennent de l'inventaire SeisComP (`fetch.fdsnws_station_url`),
+valides sur la période. En 3D, les stations hors de l'emprise du modèle
+sont ignorées. Compter environ 2 s par station et par phase pour une grille
+3D au pas de 0,5 km sur la tuile Ubaye, et 87 Mo par grille (temps + angles).
+
+#### Créer un nouveau profil
+
+Exemple : `profils/05_ubaye_3D_topo/`, modèle 3D au pas de 0,5 km avec
+topographie.
+
+1. `model/layer.P.mod.*` et `layer.S.mod.*` : le modèle de vitesse au format
+   NLL (sortie de `nll_pipeline.py`).
+2. `topo.asc` (si topographie) : sortie de `nll_pipeline.py`, en-tête au
+   format GMT 4 (`topo_header()`).
+3. `nll_<profil>.in` : `TRANS`, `GTFILES <modèle> <grilles> P`, `GTMODE`,
+   `GT_PLFD` (pas de `GTSRCE` : `--grilles` les prend dans l'inventaire).
+   `${NLLROOT}` = `run.profils_dir`. Deux profils peuvent partager les mêmes
+   grilles : `GTFILES` pointe alors vers le même dossier.
+4. `NLL.<profil>.conf` : `TRANS` (le même que pour les grilles), `LOCGRID`,
+   `LOCSEARCH`, `LOCMETH`… et `LOCTOPO_SURFACE ${NLLROOT}/<profil>/topo.asc 0`.
+   La grille de recherche n'a pas besoin du pas des grilles de temps :
+   l'octree subdivise lui-même. Choisir des cellules initiales d'environ
+   3 km de côté dans chaque direction (ex. `LOCGRID 101 101 36 -50 -50 -5 1 1 1`
+   et `OCT 30 30 11` : 100/30 et 35/11 km).
+5. `python nll_run.py --profil <profil> --debut … --fin … --grilles`.
+
 Sur novembre 2024 avec le profil `1D_ubaye`, 93 % des 3022 événements
 communs avec le run SeisComP `1D_ubaye_v2` ont exactement la même position.
 Les écarts concernent surtout les événements pointés sur des stations à plus
