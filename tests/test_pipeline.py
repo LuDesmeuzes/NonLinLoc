@@ -71,7 +71,7 @@ def test_topo_header_matches_nll_reader():
 
 def test_seiscomp_xml_to_obs(tmp_path):
     """Une arrivée utilisée → une ligne NLLOC_OBS ; l'arrivée non utilisée est ignorée."""
-    from seiscomp_xml_to_obs import obs_line, parse_event_xml
+    from seiscomp_xml_to_obs import obs_line, parse_events_xml
 
     xml = tmp_path / "ev.xml"
     xml.write_text(
@@ -90,8 +90,10 @@ def test_seiscomp_xml_to_obs(tmp_path):
         '<arrival><pickID>p3</pickID><phase>Pg</phase><timeUsed>false</timeUsed></arrival>'
         '</origin></EventParameters></seiscomp>'
     )
-    info, phases = parse_event_xml(xml)
-    assert info["method"] == "LOCSAT"
+    [event] = parse_events_xml(xml)
+    assert event["event_id"] is None
+    assert event["method"] == "LOCSAT"
+    phases = event["phases"]
     assert [p["station"] for p in phases] == ["CREF", "JAUF"]
     assert phases[0]["error_s"] is None
     assert phases[1]["error_s"] == pytest.approx(0.2)
@@ -100,3 +102,79 @@ def test_seiscomp_xml_to_obs(tmp_path):
     assert line[0] == "CREF" and line[4] == "Pg"
     assert line[6:9] == ["20230514", "0625", "18.5603"]
     assert line[9:11] == ["GAU", "0.100"]
+
+
+def test_parse_events_xml_journee(tmp_path):
+    """XML d'une journée : un événement par <event>, avec son origine préférée."""
+    from seiscomp_xml_to_obs import parse_events_xml, write_obs
+
+    xml = tmp_path / "2024-11-01.xml"
+    xml.write_text(
+        '<seiscomp xmlns="http://geofon.gfz-potsdam.de/ns/seiscomp3-schema/0.13"><EventParameters>'
+        '<pick publicID="p1"><time><value>2024-11-01T23:55:56.38Z</value></time>'
+        '<waveformID networkCode="FR" stationCode="SURF"/></pick>'
+        '<pick publicID="p2"><time><value>2024-11-01T22:39:53.1Z</value></time>'
+        '<waveformID networkCode="FR" stationCode="JAUF"/></pick>'
+        '<origin publicID="o1"><time><value>2024-11-01T23:55:55.36Z</value></time>'
+        '<latitude><value>44.49</value><uncertainty>0.5</uncertainty></latitude>'
+        '<longitude><value>6.88</value><uncertainty>0.4</uncertainty></longitude>'
+        '<depth><value>1.57</value></depth><methodID>LOCSAT</methodID>'
+        '<quality><standardError>0.12</standardError></quality>'
+        '<arrival><pickID>p1</pickID><phase>P</phase><timeUsed>true</timeUsed></arrival></origin>'
+        '<origin publicID="o2"><time><value>2024-11-01T22:39:51.9Z</value></time><methodID>LOCSAT</methodID>'
+        '<arrival><pickID>p2</pickID><phase>S</phase><timeUsed>true</timeUsed></arrival></origin>'
+        '<event publicID="ev1"><preferredOriginID>o1</preferredOriginID><type>earthquake</type></event>'
+        '<event publicID="ev2"><preferredOriginID>o2</preferredOriginID><type>earthquake</type></event>'
+        '</EventParameters></seiscomp>'
+    )
+    events = parse_events_xml(xml)
+    assert [e["event_id"] for e in events] == ["ev1", "ev2"]
+    assert events[0]["origin_id"] == "o1" and events[0]["latitude"] == pytest.approx(44.49)
+    assert events[0]["lat_unc_km"] == pytest.approx(0.5) and events[0]["rms"] == pytest.approx(0.12)
+    assert [p["station"] for p in events[1]["phases"]] == ["JAUF"]
+
+    obs, csv_path = tmp_path / "p.obs", tmp_path / "p.csv"
+    n_ev, n_ph, n_default = write_obs(events, obs, csv_path, {"P": 0.02, "S": 0.02})
+    assert (n_ev, n_ph, n_default) == (2, 2, 2)
+    text = obs.read_text()
+    assert "PUBLIC_ID ev1" in text and "PUBLIC_ID ev2" in text
+    assert " 0.020 " in text
+
+
+def test_read_profile_conf(tmp_path):
+    """Commentaires et lignes gérées par nll_run.py retirés, ${NLLROOT} remplacé."""
+    from nll_run import control_file, keyword_values, read_profile_conf
+
+    conf = tmp_path / "NLL.p.conf"
+    conf.write_text(
+        "CONTROL 9 159753\n"
+        "# commentaire\n"
+        "LOCSEARCH OCT 30 30 9 0.001 50000 5000 0 1    # depuis v2\n"
+        "LOCFILES a b c d\n"
+        "LOCTOPO_SURFACE ${NLLROOT}/p/topo.asc\n"
+    )
+    lines = read_profile_conf(conf, "/profils")
+    assert lines == ["LOCSEARCH OCT 30 30 9 0.001 50000 5000 0 1",
+                     "LOCTOPO_SURFACE /profils/p/topo.asc"]
+    assert keyword_values(lines, "LOCSEARCH")[:4] == ["OCT", "30", "30", "9"]
+    text = control_file(lines, "obs.obs", "time/layer", "loc/loc")
+    assert text.startswith("CONTROL 1 ")
+    assert "LOCFILES obs.obs NLLOC_OBS time/layer loc/loc" in text
+
+
+def test_split_obs_and_missing_grids(tmp_path):
+    from nll_run import split_obs, stations_without_grid
+
+    obs = tmp_path / "p.obs"
+    line = "{} ?    ?    ? {}      ? 20241101 2355  56.3800 GAU  0.020      -1.00e+00 -1.00e+00 -1.00e+00"
+    blocks = [f"#event ev{i} 2 picks\nPUBLIC_ID ev{i}\n" + line.format("SURF", "P") + "\n"
+              + line.format("ABSE", "S") for i in range(5)]
+    obs.write_text("\n\n".join(blocks) + "\n\n")
+    paths, n = split_obs(obs, 2, tmp_path / "parts")
+    assert n == 5 and len(paths) == 2
+    assert sum(p.read_text().count("PUBLIC_ID") for p in paths) == 5
+
+    (tmp_path / "time").mkdir()
+    (tmp_path / "time" / "layer.P.SURF.time.hdr").write_text("")
+    missing = stations_without_grid(obs, tmp_path / "time" / "layer")
+    assert missing == {"P": [], "S": ["ABSE"]}

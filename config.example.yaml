@@ -88,4 +88,34 @@ phases:
 
   # Incertitude (s) des pointés qui n'en ont pas dans le XML (pointés
   # automatiques). À aligner sur NonLinLoc.defaultPickError de SeisComP.
-  default_error_s: {P: 0.1, S: 0.1}
+  default_error_s: {P: 0.02, S: 0.02}
+
+# ── Paramètres de fetch_picks.py ────────────────────────────────────────────
+fetch:
+  # Service web fdsnws-event du serveur SeisComP
+  fdsnws_url: "http://ist-sc3-sig.u-ga.fr:8080/fdsnws/event/1/query"
+
+  # Zone des événements à récupérer (degrés). Celle-ci couvre les
+  # événements du run SeisComP 1D_ubaye_v2.
+  zone: {lat_min: 44.40, lat_max: 44.63, lon_min: 6.59, lon_max: 6.92}
+
+  # Types d'événements gardés (null → tous)
+  event_types: [earthquake]
+
+  # Dossier des XML journaliers (cache : une journée n'est téléchargée qu'une fois)
+  cache_dir: "/path/to/Localisation/donnees/pointes/xml_seiscomp/par_jour"
+
+  # Dossier des fichiers de pointés periode_<debut>_<fin>.obs
+  obs_dir: "/path/to/Localisation/donnees/pointes/nll_obs"
+
+# ── Paramètres de nll_run.py ────────────────────────────────────────────────
+run:
+  # Dossier des profils : un sous-dossier par profil, avec NLL.<profil>.conf
+  # (copie de la configuration SeisComP) et time/ (grilles de temps)
+  profils_dir: "/path/to/Localisation/profils"
+
+  # Dossier où chaque run crée son sous-dossier <nom>/
+  runs_dir: "/path/to/Localisation/runs"
+
+  # Binaire NLLoc
+  nlloc: "/path/to/Localisation/outils/bin/NLLoc"

@@ -95,21 +95,72 @@ python segment_from_zones.py
 python nll_pipeline.py
 ```
 
-### Pointés pour NLL en ligne de commande
+### Lancer un profil NLL en local sur une période
 
-`seiscomp_xml_to_obs.py` convertit des exports XML SeisComP (un fichier par
-événement : origine passée à NLL, arrivées et pointés) en un fichier de
-pointés au format `NLLOC_OBS`. On peut ainsi relancer NLL en ligne de
-commande sur exactement les phases utilisées par SeisComP.
+`nll_run.py` relocalise avec NLL en ligne de commande les événements d'une
+période, avec la configuration d'un profil SeisComP, sans passer par le
+serveur :
+
+```bash
+python nll_run.py --profil 1D_ubaye --debut 2024-11-01 --fin 2024-11-30
+python nll_run.py --profil 1D_ubaye --debut 2024-11-01 --fin 2024-11-30 \
+    --nom 1D_ubaye_oct15 --locsearch "OCT 15 15 15 0.001 50000 5000 0 1"
+```
+
+1. Les pointés de la période sont récupérés par `fetch_picks.py` (ci-dessous).
+2. Le fichier de contrôle reprend `<run.profils_dir>/<profil>/NLL.<profil>.conf`,
+   copie de la configuration du profil sur la machine SeisComP (`TRANS`,
+   `LOCGRID`, `LOCSEARCH`, `LOCMETH`, `LOCTOPO_SURFACE`…), avec les grilles
+   de temps de `<profil>/time/`. `${NLLROOT}` est remplacé par
+   `run.profils_dir`. `--locsearch` remplace `LOCSEARCH` pour un test.
+3. `NLLoc` tourne en parallèle sur `--jobs` morceaux de la période (par
+   défaut, nombre de cœurs − 1) : environ 2 minutes pour 3000 événements.
+4. Le run est écrit dans `<run.runs_dir>/<nom>/` : `<nom>.hyp` (toutes les
+   localisations), `evenements.csv` (origine de référence) et `run.yaml`
+   (profil, période, paramètres, comptes). LocQuality_ToolBox lit ce dossier
+   directement (`paths.nll_runs`).
+
+Les stations des pointés sans grille de temps dans le profil sont signalées
+(NLLoc ignore leurs phases). Pour qu'un run local reproduise SeisComP, la
+copie locale `NLL.<profil>.conf` doit être à jour avec celle du serveur.
+
+Sur novembre 2024 avec le profil `1D_ubaye`, 93 % des 3022 événements
+communs avec le run SeisComP `1D_ubaye_v2` ont exactement la même position.
+Les écarts concernent surtout les événements pointés sur des stations à plus
+de 50 km. Les statistiques d'ensemble (RMS, incertitudes, écart au LOCSAT,
+classes de qualité) sont identiques à 1 % près.
+
+### Pointés SeisComP pour NLL en ligne de commande
+
+`fetch_picks.py` récupère sur le serveur SeisComP (service web
+fdsnws-event, sans connexion à la machine) les événements d'une période et
+de `fetch.zone`, avec leur origine préférée (le manuel), ses arrivées et ses
+pointés, et les convertit au format `NLLOC_OBS` :
+
+```bash
+python fetch_picks.py --debut 2024-11-01 --fin 2024-11-30
+```
+
+Une requête par jour ; chaque journée est gardée dans `fetch.cache_dir` et
+n'est plus redemandée ensuite (`--refresh` pour retélécharger, par exemple
+après une révision des pointés). Le service ne renvoie que l'origine
+préférée de chaque événement : les origines NLL du serveur ne sont pas
+récupérables par ce biais.
+
+`seiscomp_xml_to_obs.py` fait la même conversion sur des dossiers de XML
+déjà téléchargés (`phases.xml_dirs`, un ou plusieurs événements par
+fichier) :
 
 ```bash
 python seiscomp_xml_to_obs.py
 ```
 
 Seules les arrivées utilisées (`timeUsed`) sont gardées. Les pointés sans
-incertitude dans le XML (pointés automatiques) reçoivent
-`phases.default_error_s`, à aligner sur `NonLinLoc.defaultPickError` de
-SeisComP. Les XML vides ou tronqués sont ignorés et listés à part.
+incertitude (presque tous : pointés automatiques et manuels sans
+incertitude) reçoivent `phases.default_error_s`, la valeur de
+`NonLinLoc.defaultPickError` de SeisComP (0,02 s). Chaque événement est
+précédé de `PUBLIC_ID <Event ID>`, que NLLoc recopie dans ses `.hyp`. Les
+XML vides ou tronqués sont ignorés et listés à part.
 
 Un fichier de configuration alternatif peut être passé explicitement :
 
@@ -125,8 +176,10 @@ pytest tests/
 
 Les tests couvrent la projection Azimuthal Equidistant, le parsing des
 `README.txt`, le chargement de la configuration et l'algorithme
-d'extraction du plus grand rectangle complet, l'en-tête de `topo.asc` et la
-conversion des XML SeisComP en pointés NLL.
+d'extraction du plus grand rectangle complet, l'en-tête de `topo.asc`, la
+conversion des XML SeisComP en pointés NLL (un ou plusieurs événements par
+fichier) et la préparation d'un run local (fichier de contrôle, découpage
+des pointés, stations sans grille).
 
 ## Structure des fichiers
 
@@ -140,6 +193,8 @@ NonLinLoc_ToolBox/
 ├── segment_from_zones.py      ← étape 1 : découpage en tuiles
 ├── nll_pipeline.py            ← étape 2 : génération des fichiers NLL
 ├── seiscomp_xml_to_obs.py     ← pointés SeisComP (XML) → NLLOC_OBS
+├── fetch_picks.py             ← pointés d'une période depuis le serveur (fdsnws)
+├── nll_run.py                 ← run NLL local : profil × période
 ├── tests/                     ← tests unitaires (pytest)
 └── docs/                      ← tutoriel NLL/SeisComP + exemples de fichiers .in
 ```
