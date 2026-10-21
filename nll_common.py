@@ -84,6 +84,21 @@ class AzimuthalEquidistant:
         y = k * (self._cosp * slat - self._sinp * clat * clon)
         return x, y
 
+    def inverse(self, x, y):
+        """(x, y) en km → (lon, lat) en degrés (inverse exact de forward)."""
+        x = np.asarray(x, dtype=float)
+        y = np.asarray(y, dtype=float)
+        rho = np.hypot(x, y)
+        c = rho / self.R
+        sin_c, cos_c = np.sin(c), np.cos(c)
+        rho_safe = np.where(rho == 0.0, 1.0, rho)
+        lat = np.arcsin(np.clip(cos_c * self._sinp + y * sin_c * self._cosp / rho_safe, -1.0, 1.0))
+        lon = self.lon0 * D2R + np.arctan2(x * sin_c,
+                                           rho * self._cosp * cos_c - y * self._sinp * sin_c)
+        lat = np.where(rho == 0.0, self.lat0 * D2R, lat)
+        lon = np.where(rho == 0.0, self.lon0 * D2R, lon)
+        return lon * R2D, lat * R2D
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LECTURE DES README.txt (générés par segment_from_zones.py)

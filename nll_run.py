@@ -194,18 +194,37 @@ def make_time_grids(grid_control, missing, coords, grid2time, work_dir):
     return skipped
 
 
-def stations_without_grid(obs_path, grid_root):
-    """Stations des pointés sans grille de temps, par type de phase : {'P': [...], 'S': [...]}."""
+def stations_used(obs_path):
+    """Stations des pointés, par type de phase : {'P': {...}, 'S': {...}}."""
     used = {"P": set(), "S": set()}
     for line in Path(obs_path).read_text().splitlines():
         parts = line.split()
         if len(parts) > 5 and not line.startswith(("#", "PUBLIC_ID")):
             used.setdefault(parts[4][:1].upper(), set()).add(parts[0])
+    return used
+
+
+def stations_without_grid(obs_path, grid_root):
+    """Stations des pointés sans grille de temps, par type de phase : {'P': [...], 'S': [...]}."""
+    used = stations_used(obs_path)
     missing = {}
     for phase, stations in used.items():
         missing[phase] = sorted(s for s in stations
                                 if not Path(f"{grid_root}.{phase}.{s}.time.hdr").exists())
     return missing
+
+
+def drop_stations(obs_path, stations, out_path):
+    """Copie obs_path sans les phases des stations données ; renvoie (out_path, phases retirées)."""
+    stations, kept, n_dropped = set(stations), [], 0
+    for line in Path(obs_path).read_text().splitlines():
+        parts = line.split()
+        if len(parts) > 5 and not line.startswith(("#", "PUBLIC_ID")) and parts[0] in stations:
+            n_dropped += 1
+            continue
+        kept.append(line)
+    Path(out_path).write_text("\n".join(kept) + "\n")
+    return Path(out_path), n_dropped
 
 
 def split_obs(obs_path, n_chunks, out_dir):
@@ -328,6 +347,9 @@ def parse_args():
     parser.add_argument("--locsearch", help="Remplace le LOCSEARCH du profil, ex. \"OCT 30 30 9 0.001 50000 5000 0 1\"")
     parser.add_argument("--refresh", action="store_true",
                         help="Retélécharger les pointés déjà en cache")
+    parser.add_argument("--exclure-hors-modele", metavar="PROFIL",
+                        help="Retirer les phases des stations hors de l'emprise du modèle 3D de PROFIL "
+                             "(pour comparer des profils sur les mêmes phases)")
     parser.add_argument("--grilles", action="store_true",
                         help="Calculer (Grid2Time) les grilles de temps manquantes du profil")
     parser.add_argument("--force", action="store_true",
@@ -361,6 +383,20 @@ def main():
     log("Pointés")
     obs_path, events_csv = fetch_period(config, args.debut, args.fin, args.refresh)
     shutil.copy(events_csv, run_dir / "evenements.csv")
+    excluded, n_dropped = [], 0
+    if args.exclure_hors_modele:
+        ref_dir = profils_dir / args.exclure_hors_modele
+        ref_control = read_grid_control(ref_dir, profils_dir)
+        if ref_control is None:
+            raise SystemExit(f"--exclure-hors-modele : pas de GTFILES dans {ref_dir}")
+        used = set().union(*stations_used(obs_path).values())
+        coords = station_coordinates(config["fetch"]["fdsnws_station_url"], used,
+                                     args.debut, args.fin)
+        excluded = sorted(s for s in used if s not in coords or not inside_model_grid(
+            ref_control["model_root"], ref_control["trans"], coords[s][0], coords[s][1]))
+        obs_path, n_dropped = drop_stations(obs_path, excluded, run_dir / "pointes_filtres.obs")
+        log(f"{len(excluded)} stations hors du modèle de {args.exclure_hors_modele} : "
+            f"{n_dropped} phases retirées", 1)
 
     log("Fichier de contrôle")
     lines = read_profile_conf(conf_path, profils_dir)
@@ -426,6 +462,9 @@ def main():
         "grilles_temps": str(grid_root),
         "pointes": str(obs_path),
         "erreur_pointe_defaut_s": config["phases"]["default_error_s"],
+        "stations_exclues": {"hors_modele_de": args.exclure_hors_modele,
+                             "stations": excluded, "phases_retirees": n_dropped}
+                            if args.exclure_hors_modele else None,
         "evenements": n_events, "localises": n_located, "rejetes": n_rejected,
         "phases": n_phases,
         "duree_s": round(elapsed),

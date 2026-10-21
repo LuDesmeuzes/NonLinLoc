@@ -50,6 +50,21 @@ le code.
    du plus grand rectangle complet, écriture des fichiers binaires NLL
    (`layer.P/S.mod.hdr/.buf`) et de la topographie (`topo.asc`).
 
+   Avec `pipeline.interp_method: grille` (par défaut), chaque nœud de la
+   grille NLL est ramené en longitude/latitude par la projection inverse et
+   la vitesse est interpolée linéairement dans la grille d'origine du modèle
+   (lon, lat, profondeur) : environ 10 s pour une tuile de 20 millions de
+   nœuds, contre plus d'une heure avec l'ancienne interpolation par points
+   dispersés (`linear` / `nearest`, gardée pour un modèle non régulier).
+   L'ancienne méthode décalait aussi le modèle d'une fraction de maille
+   (jusqu'à 0,25 km). Avec `pipeline.fix_vpvs`, les Vp/Vs physiquement
+   impossibles sont corrigés dans les fichiers produits (étape 3b).
+
+   Attention : `nll_pipeline.py` traite **tous** les sous-dossiers de
+   `paths.tuiles_dir` qui ont un `README.txt`. Pour refaire une seule tuile,
+   utiliser un dossier de travail et une configuration à part (exemple :
+   `profils_travail/tuile_3D_60km/config_tuile_3D_60km.yaml`).
+
 Le code partagé entre les deux scripts (projection, lecture des
 `README.txt`, config) vit dans `nll_common.py`.
 

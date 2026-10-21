@@ -186,6 +186,64 @@ def test_read_grid_control_and_model_bounds(tmp_path):
     assert not inside_model_grid(gc["model_root"], gc["trans"], 45.5585, 2.9121)
 
 
+def test_build_nll_model_on_grid_reproduces_linear_model(tmp_path):
+    """
+    Modèle source régulier en (lon, lat, prof) et linéaire : l'interpolation
+    dans la grille d'origine doit le restituer exactement aux nœuds NLL
+    (ramenés en lon/lat par la projection AE inverse).
+    """
+    from nll_common import AzimuthalEquidistant
+    from nll_pipeline import build_nll_model_on_grid
+
+    lon0, lat0 = 6.745, 44.505
+    lons = np.round(np.arange(6.5, 7.0001, 0.05), 4)
+    lats = np.round(np.arange(44.3, 44.7001, 0.05), 4)
+    deps = np.arange(-1.0, 4.0001, 1.0)
+    vp = lambda lo, la, z: 5000 + 100 * (lo - 6.5) + 200 * (la - 44.3) + 50 * z
+    rows = ["Longitude,Latitude,Depth,Vitesse onde P,Vitesse onde S"]
+    for lo in lons:
+        for la in lats:
+            for z in deps:
+                rows.append(f"{lo},{la},{z},{vp(lo, la, z)},{vp(lo, la, z) / 1.73}")
+    csv = tmp_path / "tuile_elevated.csv"
+    csv.write_text("\n".join(rows) + "\n")
+
+    assert build_nll_model_on_grid(csv, tmp_path, lon0, lat0, 0.5, True)
+    head = (tmp_path / "layer.P.mod.hdr").read_text().split()
+    nx, ny, nz = int(head[0]), int(head[1]), int(head[2])
+    x0, y0, z0 = float(head[3]), float(head[4]), float(head[5])
+    assert x0 % 0.5 == 0 and y0 % 0.5 == 0 and z0 == -1.0   # nœuds aux multiples exacts du pas
+    v = 0.5 / np.fromfile(tmp_path / "layer.P.mod.buf", dtype=np.float32).reshape(nx, ny, nz)
+    i, j, k = nx // 2, ny // 3, 2
+    lon, lat = AzimuthalEquidistant(lon0, lat0).inverse(x0 + 0.5 * i, y0 + 0.5 * j)
+    assert v[i, j, k] == pytest.approx(vp(lon, lat, z0 + 0.5 * k) / 1000, rel=1e-5)
+
+
+def test_azimuthal_equidistant_inverse_roundtrip():
+    from nll_common import AzimuthalEquidistant
+
+    ae = AzimuthalEquidistant(6.745, 44.505)
+    lon = np.array([5.5, 6.745, 8.0]); lat = np.array([43.7, 44.505, 45.4])
+    back_lon, back_lat = ae.inverse(*ae.forward(lon, lat))
+    assert back_lon == pytest.approx(lon, abs=1e-9)
+    assert back_lat == pytest.approx(lat, abs=1e-9)
+
+
+def test_fix_vpvs(tmp_path):
+    """Seuls les nœuds hors bornes changent ; Vp n'est jamais modifié."""
+    from nll_pipeline import fix_vpvs
+
+    vp = np.array([5.0, 5.0, 5.0, 5.0], dtype=np.float32)
+    vs = np.array([2.9, 6.0, 3.6, 2.0], dtype=np.float32)   # Vp/Vs 1,72 · 0,83 · 1,39 · 2,5
+    (0.5 / vp).astype(np.float32).tofile(tmp_path / "layer.P.mod.buf")
+    (0.5 / vs).astype(np.float32).tofile(tmp_path / "layer.S.mod.buf")
+    n, total = fix_vpvs(tmp_path, 1.5, 2.0, 1.73)
+    assert (n, total) == (3, 4)
+    new_vs = 0.5 / np.fromfile(tmp_path / "layer.S.mod.buf", dtype=np.float32)
+    assert new_vs == pytest.approx([2.9, 5 / 1.73, 5 / 1.73, 5 / 1.73], rel=1e-5)
+    assert 0.5 / np.fromfile(tmp_path / "layer.P.mod.buf", dtype=np.float32) == pytest.approx(vp)
+
+
 def test_parse_phase_line():
     """Ligne réelle du bloc PHASE d'un .hyp NLLoc 7."""
     from nll_run import parse_phase_line
@@ -199,6 +257,19 @@ def test_parse_phase_line():
     assert ph["error_s"] == pytest.approx(0.05)
     assert (ph["tt_pred_s"], ph["residual_s"], ph["weight"]) == (4.394, -0.1787, 0.8278)
     assert (ph["dist_km"], ph["azimuth"], ph["ray_dip"]) == (12.2572, 200.54, 112.5)
+
+
+def test_drop_stations(tmp_path):
+    from nll_run import drop_stations, stations_used
+
+    line = "{} ?    ?    ? {}      ? 20241101 2355  56.3800 GAU  0.020      -1.00e+00 -1.00e+00 -1.00e+00"
+    obs = tmp_path / "p.obs"
+    obs.write_text("#event ev1 3 picks\nPUBLIC_ID ev1\n" + "\n".join(
+        [line.format("SURF", "P"), line.format("LOIN", "P"), line.format("LOIN", "S")]) + "\n\n")
+    out, n = drop_stations(obs, ["LOIN"], tmp_path / "f.obs")
+    assert n == 2
+    assert stations_used(out) == {"P": {"SURF"}, "S": set()}
+    assert "PUBLIC_ID ev1" in out.read_text()
 
 
 def test_split_obs_and_missing_grids(tmp_path):

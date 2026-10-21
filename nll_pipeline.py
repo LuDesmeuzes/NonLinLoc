@@ -64,7 +64,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy.interpolate import griddata
+from scipy.interpolate import RegularGridInterpolator, griddata
 import csv as csv_module
 
 from nll_common import (
@@ -222,6 +222,92 @@ def step2_largest_rectangle(in_path, out_path, step_km):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# ÉTAPES 1 À 3 EN UNE FOIS — INTERPOLATION DANS LA GRILLE D'ORIGINE
+# ─────────────────────────────────────────────────────────────────────────────
+
+def regular_source_grid(data):
+    """
+    Remet le modèle (lon, lat, depth, Vp, Vs) sur sa grille régulière
+    d'origine : (lons, lats, depths, Vp[nlon, nlat, nz], Vs[…]), ou None si
+    les points ne forment pas une grille complète.
+    """
+    lons, ilon = np.unique(np.round(data["lon"], 6), return_inverse=True)
+    lats, ilat = np.unique(np.round(data["lat"], 6), return_inverse=True)
+    deps, idep = np.unique(np.round(data["depth"], 6), return_inverse=True)
+    if len(lons) * len(lats) * len(deps) != len(data["lon"]):
+        return None
+    vp = np.full((len(lons), len(lats), len(deps)), np.nan)
+    vs = np.full_like(vp, np.nan)
+    vp[ilon, ilat, idep] = data["Vp"]
+    vs[ilon, ilat, idep] = data["Vs"]
+    if np.isnan(vp).any() or np.isnan(vs).any():
+        return None
+    return lons, lats, deps, vp, vs
+
+
+def build_nll_model_on_grid(csv_path, nll_dir, lon0, lat0, step_km, vel_in_ms):
+    """
+    Remplace les étapes 1 à 3 quand le modèle source est une grille régulière
+    en (lon, lat, profondeur), comme celui de Virieux et Ahmed : chaque nœud
+    de la grille NLL (multiples exacts de step_km, en km projetés) est ramené
+    en (lon, lat) par la projection AE inverse, puis la vitesse y est
+    interpolée linéairement dans la grille d'origine. Les colonnes qui
+    sortent de l'emprise du modèle sont retirées en gardant le plus grand
+    rectangle complet. Quelques secondes au lieu d'une heure, et sans le
+    décalage d'une fraction de maille de l'ancienne étape 1 (interpolation
+    à x_min + k·pas puis rangement au multiple de pas le plus proche).
+    Renvoie False si le modèle n'est pas une grille régulière.
+    """
+    log("Chargement du CSV …", 2)
+    data = load_csv_model(csv_path)
+    grid = regular_source_grid(data)
+    if grid is None:
+        log("Modèle source non régulier : méthode par points dispersés", 2)
+        return False
+    lons, lats, deps, vp_src, vs_src = grid
+    if vel_in_ms:
+        vp_src, vs_src = vp_src / 1000.0, vs_src / 1000.0
+    log(f"Grille d'origine : {len(lons)} lon × {len(lats)} lat × {len(deps)} prof "
+        f"[{deps.min():.1f}, {deps.max():.1f}] km", 3)
+
+    proj = AzimuthalEquidistant(lon0, lat0)
+    lon_g, lat_g = np.meshgrid(lons, lats, indexing="ij")
+    x_src, y_src = proj.forward(lon_g, lat_g)
+    xa = np.arange(np.ceil(x_src.min() / step_km), np.floor(x_src.max() / step_km) + 1) * step_km
+    ya = np.arange(np.ceil(y_src.min() / step_km), np.floor(y_src.max() / step_km) + 1) * step_km
+    za = np.arange(np.ceil(deps.min() / step_km), np.floor(deps.max() / step_km) + 1) * step_km
+    log(f"Grille NLL : {len(xa)} × {len(ya)} × {len(za)} = {len(xa) * len(ya) * len(za):,} nœuds", 3)
+
+    X, Y = np.meshgrid(xa, ya, indexing="ij")
+    lon_t, lat_t = proj.inverse(X, Y)
+    interp_p = RegularGridInterpolator((lons, lats, deps), vp_src, bounds_error=False)
+    interp_s = RegularGridInterpolator((lons, lats, deps), vs_src, bounds_error=False)
+    vp = np.empty((len(xa), len(ya), len(za)), dtype=np.float32)
+    vs = np.empty_like(vp)
+    for k, z in enumerate(za):
+        pts = np.column_stack([lon_t.ravel(), lat_t.ravel(), np.full(lon_t.size, z)])
+        vp[:, :, k] = interp_p(pts).reshape(lon_t.shape)
+        vs[:, :, k] = interp_s(pts).reshape(lon_t.shape)
+
+    present = ~np.isnan(vp).any(axis=2)
+    heights = np.zeros(len(ya), dtype=int)
+    best = (0, 0, 0, 0, 0)
+    for i in range(len(xa)):
+        heights = np.where(present[i], heights + 1, 0)
+        area, jl, jr = largest_rect_histogram(heights)
+        h = heights[jl:jr + 1].min()
+        if area > best[0]:
+            best = (area, i - h + 1, i, jl, jr)
+    _, ix0, ix1, iy0, iy1 = best
+    xa, ya = xa[ix0:ix1 + 1], ya[iy0:iy1 + 1]
+    vp, vs = vp[ix0:ix1 + 1, iy0:iy1 + 1], vs[ix0:ix1 + 1, iy0:iy1 + 1]
+    log(f"Rectangle : x [{xa[0]:.2f}, {xa[-1]:.2f}]  y [{ya[0]:.2f}, {ya[-1]:.2f}] km", 2)
+
+    write_nll_model(nll_dir, xa, ya, za, vp, vs, lon0, lat0, step_km)
+    return True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # ÉTAPE 3 — ÉCRITURE DES FICHIERS NLL
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -259,6 +345,13 @@ def step3_write_nll(in_path, nll_dir, lon0, lat0, step_km, vel_in_ms):
             Vp_3d[ii, ji, ki] = vp
             Vs_3d[ii, ji, ki] = vs
 
+    write_nll_model(nll_dir, xa, ya, za, Vp_3d, Vs_3d, lon0, lat0, step_km)
+
+
+def write_nll_model(nll_dir, xa, ya, za, Vp_3d, Vs_3d, lon0, lat0, step_km):
+    """Écrit layer.P/S.mod.hdr/.buf (SLOW_LEN) à partir de vitesses en km/s (nx, ny, nz)."""
+    nx, ny, nz = Vp_3d.shape
+
     def to_slow_len(v3d):
         v_safe = np.where(v3d <= 0.0, 1e-6, v3d)
         return (1.0 / v_safe * step_km).astype(np.float32)
@@ -289,6 +382,30 @@ def step3_write_nll(in_path, nll_dir, lon0, lat0, step_km, vel_in_ms):
 
     log(f"SLOW_LEN P [{SLp.min():.5f}, {SLp.max():.5f}] s", 3)
     log(f"SLOW_LEN S [{SLs.min():.5f}, {SLs.max():.5f}] s", 3)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ÉTAPE 3b — CORRECTION DES Vp/Vs IMPOSSIBLES (fichiers NLL dérivés seulement)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fix_vpvs(nll_dir, vpvs_min=1.5, vpvs_max=2.0, vpvs_ref=1.73):
+    """
+    Dans layer.P/S.mod.buf (SLOW_LEN), là où Vp/Vs sort de [vpvs_min, vpvs_max]
+    (dont Vs > Vp, physiquement impossible), garde Vp et remplace Vs par
+    Vp / vpvs_ref. Le modèle d'origine n'est pas touché : seul le fichier S
+    dérivé est réécrit. Renvoie (nœuds corrigés, nœuds au total).
+    """
+    nll_dir = Path(nll_dir)
+    slp = np.fromfile(nll_dir / "layer.P.mod.buf", dtype=np.float32)
+    s_path = nll_dir / "layer.S.mod.buf"
+    sls = np.fromfile(s_path, dtype=np.float32)
+    ratio = sls / slp                      # SLOW_LEN S / SLOW_LEN P = Vp / Vs
+    bad = (ratio < vpvs_min) | (ratio > vpvs_max)
+    sls[bad] = (slp[bad] * vpvs_ref).astype(np.float32)
+    sls.tofile(s_path)
+    log(f"Vp/Vs hors [{vpvs_min}, {vpvs_max}] : {bad.sum()} nœuds sur {bad.size} "
+        f"({100 * bad.mean():.2f} %) → Vs = Vp / {vpvs_ref}", 3)
+    return int(bad.sum()), bad.size
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -433,7 +550,7 @@ def step4_generate_topo(nll_dir, lon_min, lon_max, lat_min, lat_max, step_deg):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_pipeline(tuiles_dir, use_elevated, step_km, velocities_in_ms,
-                  interp_method, generate_topo, topo_step_deg):
+                  interp_method, generate_topo, topo_step_deg, vpvs_bounds=None):
     root = Path(tuiles_dir)
     if not root.exists():
         print(f"ERREUR : dossier introuvable : {root.resolve()}")
@@ -489,24 +606,41 @@ def run_pipeline(tuiles_dir, use_elevated, step_km, velocities_in_ms,
             projete_path   = work_dir / "modele_projete.txt"
             rectangle_path = work_dir / "modele_rectangle.txt"
 
-            # ── Étape 1 ───────────────────────────────────────────────────
-            print()
-            log("ÉTAPE 1 — Projection AE + interpolation", 1)
-            step1_project_and_interpolate(
-                csv_path, lon0, lat0, projete_path, step_km, interp_method
-            )
+            # ── Étapes 1 à 3 dans la grille d'origine (interp_method: grille)
+            on_grid = False
+            if interp_method == "grille":
+                print()
+                log("ÉTAPES 1-3 — Interpolation dans la grille d'origine + fichiers NLL", 1)
+                on_grid = build_nll_model_on_grid(
+                    csv_path, nll_dir, lon0, lat0, step_km, velocities_in_ms
+                )
 
-            # ── Étape 2 ───────────────────────────────────────────────────
-            print()
-            log("ÉTAPE 2 — Extraction du plus grand rectangle", 1)
-            step2_largest_rectangle(projete_path, rectangle_path, step_km)
+            if not on_grid:
+                # ── Étape 1 ───────────────────────────────────────────────
+                print()
+                log("ÉTAPE 1 — Projection AE + interpolation", 1)
+                step1_project_and_interpolate(
+                    csv_path, lon0, lat0, projete_path, step_km,
+                    "linear" if interp_method == "grille" else interp_method
+                )
 
-            # ── Étape 3 ───────────────────────────────────────────────────
-            print()
-            log("ÉTAPE 3 — Écriture des fichiers NLL", 1)
-            step3_write_nll(
-                rectangle_path, nll_dir, lon0, lat0, step_km, velocities_in_ms
-            )
+                # ── Étape 2 ───────────────────────────────────────────────
+                print()
+                log("ÉTAPE 2 — Extraction du plus grand rectangle", 1)
+                step2_largest_rectangle(projete_path, rectangle_path, step_km)
+
+                # ── Étape 3 ───────────────────────────────────────────────
+                print()
+                log("ÉTAPE 3 — Écriture des fichiers NLL", 1)
+                step3_write_nll(
+                    rectangle_path, nll_dir, lon0, lat0, step_km, velocities_in_ms
+                )
+
+            # ── Étape 3b ──────────────────────────────────────────────────
+            if vpvs_bounds:
+                print()
+                log("ÉTAPE 3b — Correction des Vp/Vs impossibles", 1)
+                fix_vpvs(nll_dir, vpvs_bounds["min"], vpvs_bounds["max"], vpvs_bounds["ref"])
 
             # ── Étape 4 ───────────────────────────────────────────────────
             if generate_topo:
@@ -575,6 +709,7 @@ def main():
         interp_method=pipe["interp_method"],
         generate_topo=pipe["generate_topo"],
         topo_step_deg=pipe["topo_step_deg"],
+        vpvs_bounds=pipe.get("fix_vpvs"),
     )
 
 

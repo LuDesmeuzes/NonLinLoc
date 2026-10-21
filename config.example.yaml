@@ -67,7 +67,10 @@ pipeline:
   velocities_in_ms: true
 
   # Méthode d'interpolation scipy : "linear" (précis) ou "nearest" (rapide)
-  interp_method: linear
+  # "grille" : interpolation linéaire dans la grille d'origine (lon, lat,
+  # profondeur), en quelques secondes ; "linear" / "nearest" : ancienne
+  # méthode scipy par points dispersés (lente, pour un modèle non régulier)
+  interp_method: grille
 
   # Générer le fichier topo.asc (LOCTOPO_SURFACE) à partir du MNT SRTM1 ?
   generate_topo: true
@@ -75,6 +78,11 @@ pipeline:
   # Résolution de la grille topo en degrés (SRTM1 natif ≈ 0.000278°/30 m ;
   # 0.001-0.005° est un bon compromis pour NLL)
   topo_step_deg: 0.001
+
+  # Correction des Vp/Vs physiquement impossibles dans les fichiers NLL
+  # produits (le modèle d'origine n'est pas modifié) : hors [min, max],
+  # Vp est gardé et Vs = Vp / ref. null → pas de correction.
+  fix_vpvs: {min: 1.5, max: 2.0, ref: 1.73}
 
 # ── Paramètres de seiscomp_xml_to_obs.py ────────────────────────────────────
 phases:
