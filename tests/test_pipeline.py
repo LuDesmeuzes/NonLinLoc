@@ -258,6 +258,12 @@ def test_parse_phase_line():
     assert (ph["tt_pred_s"], ph["residual_s"], ph["weight"]) == (4.394, -0.1787, 0.8278)
     assert (ph["dist_km"], ph["azimuth"], ph["ray_dip"]) == (12.2572, 200.54, 112.5)
 
+    # Phase arrivée juste après minuit : NLLoc écrit 2400 la veille
+    line = ("SGSF   ?    ?    ? S      ? 20261021 2400    1.6900 GAU  2.00e-02 -1.00e+00 "
+            "-1.00e+00 -1.00e+00 >   17.8128   -0.0378    1.5689   -3.2579  -59.8303   "
+            "-0.9700   59.2993 183.55 183.5  99.3  9     0.0000")
+    assert parse_phase_line("ev2", line)["time"] == "2026-10-22T00:00:01.690000"
+
 
 def test_drop_stations(tmp_path):
     from nll_run import drop_stations, stations_used
@@ -288,3 +294,86 @@ def test_split_obs_and_missing_grids(tmp_path):
     (tmp_path / "time" / "layer.P.SURF.time.hdr").write_text("")
     missing = stations_without_grid(obs, tmp_path / "time" / "layer")
     assert missing == {"P": [], "S": ["ABSE"]}
+
+
+def test_read_hyp(tmp_path):
+    from nll_common import read_hyp
+
+    hyp = tmp_path / "run.hyp"
+    hyp.write_text(
+        'NLLOC "loc.a" "LOCATED" "Location completed."\n'
+        "PUBLIC_ID ev1\n"
+        "GEOGRAPHIC  OT 2023 05 14  06 25 16.700850  Lat 44.618439 Long 6.677626 Depth -2.581676\n"
+        "QUALITY  Pmax 1.6e+10 MFmin 10.3 MFmax 12.5 RMS 0.00237999 Nphs 5 Gap 199.6 Dist 8.8\n"
+        "END_NLLOC\n\n"
+        'NLLOC "loc.b" "REJECTED" "too few phases"\n'
+        "GEOGRAPHIC  OT 2023 05 15  19 03 38.29  Lat 44.5 Long 6.8 Depth 2.2\n"
+        "END_NLLOC\n"
+    )
+    events = read_hyp(hyp)
+    assert [(e["event_id"], e["status"]) for e in events] == [("ev1", "LOCATED"), (None, "REJECTED")]
+    assert events[0]["time"].isoformat() == "2023-05-14T06:25:16.700850"
+    assert events[0]["depth"] == pytest.approx(-2.581676)
+    assert events[0]["rms"] == pytest.approx(0.00237999)
+
+
+def test_scrtdd_build_tables():
+    from datetime import date, datetime
+
+    from scrtdd_inputs import build_tables, select_events
+
+    hyp = [
+        {"event_id": "ev2", "status": "LOCATED", "time": datetime(2024, 12, 2, 1, 0, 0),
+         "latitude": 44.5, "longitude": 6.8, "depth": 3.0},
+        {"event_id": "ev1", "status": "LOCATED", "time": datetime(2024, 12, 1, 0, 45, 59, 153000),
+         "latitude": 44.50265, "longitude": 6.84224, "depth": -0.5},
+        {"event_id": None, "status": "LOCATED", "time": datetime(2024, 12, 1, 3, 0, 0),
+         "latitude": 44.5, "longitude": 6.8, "depth": 3.0},
+        {"event_id": "ev3", "status": "REJECTED", "time": datetime(2024, 12, 1, 4, 0, 0),
+         "latitude": 44.5, "longitude": 6.8, "depth": 3.0},
+        {"event_id": "ev4", "status": "LOCATED", "time": datetime(2025, 1, 1, 0, 0, 0),
+         "latitude": 44.5, "longitude": 6.8, "depth": 3.0},
+    ]
+    events = select_events(hyp, date(2024, 12, 1), date(2024, 12, 31))
+    assert [e["event_id"] for e in events] == ["ev1", "ev2"]
+
+    def phase(sta, ph, lo=None, up=None):
+        return {"station": sta, "phase": ph, "time": datetime(2024, 12, 1, 0, 46, 1, 500000),
+                "network": "FR", "location": "00", "channel": "HHZ", "lower_s": lo, "upper_s": up}
+
+    xml = {"ev1": {"origin_id": "o1", "magnitude": 0.42,
+                   "phases": [phase("SURF", "Pg", 0.1, 0.1), phase("BHB", "Sg")]},
+           "ev2": {"origin_id": "o2", "magnitude": None, "phases": [phase("BHB", "P")]}}
+    ev_rows, ph_rows, el_rows, stations = build_tables(events, xml, excluded={"BHB"})
+    # ev2 n'a plus de phase une fois BHB exclue : ignoré, les id restent contigus
+    assert [r["id"] for r in ev_rows] == [1]
+    assert ev_rows[0]["isotime"] == "2024-12-01T00:45:59.153000Z"
+    assert ev_rows[0]["depth"] == "-0.5000" and ev_rows[0]["magnitude"] == "0.42"
+    assert el_rows == [{"origin": "o1", "event": "ev1"}]
+    assert [(r["eventId"], r["stationCode"], r["type"], r["lowerUncertainty"]) for r in ph_rows] \
+        == [(1, "SURF", "Pg", "0.1")]
+    assert stations == {("FR", "SURF", "00")}
+
+
+def test_scrtdd_reference_positions(tmp_path):
+    from datetime import datetime
+
+    from scrtdd_inputs import reference_positions
+
+    csv_path = tmp_path / "evenements.csv"
+    csv_path.write_text(
+        "event_id,origin_id,origin_time,method,latitude,longitude,depth\n"
+        "ev1,o1,2026-10-22T05:28:01.5Z,LOCSAT,45.5858,3.6704,13.6\n"
+        "ev2,o2,,LOCSAT,,,\n"
+    )
+    events = [
+        {"event_id": "ev1", "status": "LOCATED", "time": datetime(2026, 10, 22, 5, 28, 1),
+         "latitude": 45.59, "longitude": 3.66, "depth": 11.0},
+        {"event_id": "ev2", "status": "LOCATED", "time": datetime(2026, 10, 22, 6, 0, 0),
+         "latitude": 45.59, "longitude": 3.66, "depth": 11.0},
+    ]
+    out = reference_positions(events, csv_path)
+    # ev2 n'a pas d'origine de référence complète : ignoré
+    assert [e["event_id"] for e in out] == ["ev1"]
+    assert (out[0]["latitude"], out[0]["longitude"], out[0]["depth"]) == (45.5858, 3.6704, 13.6)
+    assert out[0]["time"].replace(tzinfo=None) == datetime(2026, 10, 22, 5, 28, 1, 500000)

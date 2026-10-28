@@ -175,6 +175,55 @@ Les écarts concernent surtout les événements pointés sur des stations à plu
 de 50 km. Les statistiques d'ensemble (RMS, incertitudes, écart au LOCSAT,
 classes de qualité) sont identiques à 1 % près.
 
+### Relocaliser un run local avec scrtdd sur le serveur
+
+`scrtdd_inputs.py` prépare les fichiers d'entrée de scrtdd (double
+différence) à partir d'un run NLL local. scrtdd lit alors les positions de
+départ dans ces fichiers plutôt que dans la base : on relocalise sur le
+serveur, avec son profil scrtdd et ses formes d'onde, des localisations qui
+n'existent qu'en local.
+
+```bash
+python scrtdd_inputs.py --run 05_ubaye_1D_topo_20230514_20250630
+python scrtdd_inputs.py --run 05_ubaye_1D_topo_20230514_20250630 \
+    --debut 2024-12-01 --fin 2025-02-28
+python scrtdd_inputs.py --run 05_ubaye_1D_topo_20230514_20250630 --origines reference
+```
+
+Dans `<run>/scrtdd/` :
+
+- `event.csv` : les localisations du run (événements `LOCATED`), avec un
+  `id` scrtdd = 1, 2, … dans l'ordre chronologique ;
+- `phase.csv` : les pointés de l'origine de référence, relus dans les XML du
+  cache de `fetch_picks.py` (codes réseau, location et canal, nécessaires à
+  la corrélation croisée), sans les stations exclues du run ;
+- `station.csv` : positions de l'inventaire SeisComP, valides sur la
+  période ;
+- `eventlist_<run>.csv` : `origin,event` dans l'ordre des `id`, pour que
+  LocQuality relie les `id` scrtdd aux Event ID.
+
+Avec `--origines reference`, les positions de départ sont celles de
+l'origine de référence du run (`evenements.csv`, en général le LOCSAT
+manuel), écrites par défaut dans `<run>/scrtdd_reference/` : mêmes
+événements, mêmes `id`, mêmes phases et mêmes stations que le jeu NLL, pour
+comparer les deux points de départ de la double différence.
+
+Les pointés dont le réseau diffère de l'inventaire (ex. `XX.GREVE` pour
+`9W.GREVE`) sont rattachés au réseau de l'inventaire. La magnitude vaut 0
+quand l'export fdsnws n'en donne pas.
+
+Sur le serveur, copier le dossier puis lancer scrtdd avec ces trois fichiers
+à la place d'une liste d'origines (syntaxe à vérifier avec `scrtdd --help`
+selon la version) :
+
+```bash
+scrtdd --reloc-catalog station.csv,event.csv,phase.csv --profile <profil> --console=1 -v
+```
+
+Rapatrier ensuite les sorties de scrtdd (`reloc-event.csv`,
+`reloc-phase.csv`…) dans le même dossier : les scripts `dd_*` de
+LocQuality_ToolBox le lisent directement.
+
 ### Pointés SeisComP pour NLL en ligne de commande
 
 `fetch_picks.py` récupère sur le serveur SeisComP (service web
@@ -240,6 +289,7 @@ NonLinLoc_ToolBox/
 ├── seiscomp_xml_to_obs.py     ← pointés SeisComP (XML) → NLLOC_OBS
 ├── fetch_picks.py             ← pointés d'une période depuis le serveur (fdsnws)
 ├── nll_run.py                 ← run NLL local : profil × période
+├── scrtdd_inputs.py           ← fichiers d'entrée scrtdd à partir d'un run local
 ├── tests/                     ← tests unitaires (pytest)
 └── docs/                      ← tutoriel NLL/SeisComP + exemples de fichiers .in
 ```

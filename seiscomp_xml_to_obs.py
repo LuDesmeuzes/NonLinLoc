@@ -65,7 +65,10 @@ def _float(el, path):
 
 
 def _phases(origin, picks):
-    """Phases utilisées par une origine : dict station, phase, time, error_s."""
+    """
+    Phases utilisées par une origine : dict station, phase, time, error_s,
+    et pour scrtdd network, location, channel, lower_s, upper_s.
+    """
     phases = []
     for arr in origin.iter("arrival"):
         if _text(arr, "timeUsed", "true").lower() != "true":
@@ -84,6 +87,11 @@ def _phases(origin, picks):
             "phase": _text(arr, "phase") or _text(pick, "phaseHint", "?"),
             "time": datetime.fromisoformat(_text(pick, "time/value").replace("Z", "+00:00")),
             "error_s": sum(unc) / len(unc) if unc else None,
+            "network": wf.get("networkCode"),
+            "location": wf.get("locationCode") or "",
+            "channel": wf.get("channelCode") or "",
+            "lower_s": float(lo) if lo is not None else None,
+            "upper_s": float(up) if up is not None else None,
         })
     return sorted(phases, key=lambda p: p["time"])
 
@@ -108,9 +116,9 @@ def _origin_info(origin):
 def parse_events_xml(path):
     """
     Lit un XML SeisComP et renvoie une liste d'événements : dict avec
-    event_id (None si le XML n'a pas d'élément <event>), event_type, les
-    infos de l'origine utilisée (_origin_info) et phases (liste de dicts
-    station, phase, time, error_s).
+    event_id (None si le XML n'a pas d'élément <event>), event_type,
+    magnitude (préférée, None si absente), les infos de l'origine utilisée
+    (_origin_info) et phases (liste de dicts, voir _phases).
     """
     root = _strip_ns(ET.parse(path).getroot())
     picks = {p.get("publicID"): p for p in root.iter("pick")}
@@ -125,12 +133,15 @@ def parse_events_xml(path):
         return [{"event_id": None, "event_type": None,
                  **_origin_info(origin), "phases": _phases(origin, picks)}]
 
+    # Magnitudes : l'export fdsnws n'en contient en général que quelques-unes
+    magnitudes = {m.get("publicID"): _float(m, "magnitude/value") for m in root.iter("magnitude")}
     events = []
     for ev in xml_events:
         origin = origins.get(_text(ev, "preferredOriginID"))
         if origin is None:
             continue
         events.append({"event_id": ev.get("publicID"), "event_type": _text(ev, "type"),
+                       "magnitude": magnitudes.get(_text(ev, "preferredMagnitudeID")),
                        **_origin_info(origin), "phases": _phases(origin, picks)})
     return events
 

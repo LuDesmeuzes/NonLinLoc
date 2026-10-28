@@ -294,8 +294,11 @@ def parse_phase_line(event_id, line):
     """Une ligne du bloc PHASE → dict (colonnes PHASE_COLUMNS)."""
     left, right = line.split(">", 1)
     l, r = left.split(), right.split()
-    sec = float(l[8])
-    time = datetime.strptime(l[6] + l[7], "%Y%m%d%H%M") + timedelta(seconds=sec)
+    # Heure et minutes ajoutées à part : NLLoc écrit « 2400 » (et non 0000 le
+    # lendemain) pour une phase arrivée juste après minuit
+    hhmm = int(l[7])
+    time = datetime.strptime(l[6], "%Y%m%d") + timedelta(
+        hours=hhmm // 100, minutes=hhmm % 100, seconds=float(l[8]))
     # Après « > » : TTpred Res Weight StaX StaY StaZ SDist SAzim RAz RDip RQual Tcorr …
     return {"event_id": event_id, "station": l[0], "phase": l[4],
             "time": time.isoformat(), "error_s": float(l[10]),

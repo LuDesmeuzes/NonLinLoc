@@ -5,12 +5,14 @@ Fonctions et classes partagées entre segment_from_zones.py et nll_pipeline.py :
   - lecture de la configuration YAML
   - projection cartographique Azimuthal Equidistant
   - lecture des README.txt générés par segment_from_zones.py
+  - lecture des .hyp écrits par NLLoc
   - petit helper de log indenté
 
 Ce module n'a pas vocation à être exécuté directement.
 """
 
 import re
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -140,6 +142,43 @@ def read_bounds_from_readme(readme_path):
         )
     return (float(lon_match.group(1)), float(lon_match.group(2)),
             float(lat_match.group(1)), float(lat_match.group(2)))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LECTURE DES .hyp (sorties de NLLoc)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def read_hyp(path):
+    """
+    Lit un fichier .hyp NLLoc (un ou plusieurs blocs NLLOC … END_NLLOC) et
+    renvoie une liste de dicts : event_id (PUBLIC_ID, None si absent),
+    status (LOCATED, REJECTED…), time (datetime, UTC naïf), latitude,
+    longitude, depth (km, positif vers le bas), rms (s).
+    """
+    events, ev = [], None
+    for line in Path(path).read_text().splitlines():
+        words = line.split()
+        if not words:
+            continue
+        key = words[0]
+        if key == "NLLOC":
+            ev = {"event_id": None, "status": line.split('"')[3] if line.count('"') >= 4 else None}
+        elif ev is None:
+            continue
+        elif key == "PUBLIC_ID":
+            ev["event_id"] = words[1] if len(words) > 1 else None
+        elif key == "GEOGRAPHIC":
+            y, mo, d, h, mi, sec = words[2:8]
+            ev["time"] = datetime(int(y), int(mo), int(d), int(h), int(mi)) \
+                + timedelta(seconds=float(sec))
+            ev["latitude"], ev["longitude"], ev["depth"] = (float(words[9]), float(words[11]),
+                                                            float(words[13]))
+        elif key == "QUALITY":
+            ev["rms"] = float(words[words.index("RMS") + 1])
+        elif key == "END_NLLOC":
+            events.append(ev)
+            ev = None
+    return events
 
 
 def find_input_csv(tuile_dir, use_elevated):
