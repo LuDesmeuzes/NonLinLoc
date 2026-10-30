@@ -294,6 +294,9 @@ def test_split_obs_and_missing_grids(tmp_path):
     (tmp_path / "time" / "layer.P.SURF.time.hdr").write_text("")
     missing = stations_without_grid(obs, tmp_path / "time" / "layer")
     assert missing == {"P": [], "S": ["ABSE"]}
+    # Grilles à calculer avec --grilles : P et S pour toute station pointée
+    to_make = stations_without_grid(obs, tmp_path / "time" / "layer", both_phases=True)
+    assert to_make == {"P": ["ABSE"], "S": ["ABSE", "SURF"]}
 
 
 def test_read_hyp(tmp_path):

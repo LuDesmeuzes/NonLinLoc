@@ -12,7 +12,8 @@ période, sans passer par le serveur SeisComP.
      run.profils_dir ; les grilles de temps sont celles de
      <profil>/time/<préfixe> ;
   3. avec --grilles : grilles de temps manquantes calculées par Grid2Time
-     pour les stations pointées sur la période, à partir des lignes TRANS,
+     pour les stations pointées sur la période, en P et en S même si une
+     seule phase y est pointée (pour scrtdd), à partir des lignes TRANS,
      GTFILES, GTMODE et GT_PLFD de <profil>/nll_<profil>.in, avec les
      positions de l'inventaire SeisComP (fdsnws-station) valides sur la
      période ;
@@ -204,9 +205,18 @@ def stations_used(obs_path):
     return used
 
 
-def stations_without_grid(obs_path, grid_root):
-    """Stations des pointés sans grille de temps, par type de phase : {'P': [...], 'S': [...]}."""
+def stations_without_grid(obs_path, grid_root, both_phases=False):
+    """
+    Stations des pointés sans grille de temps, par type de phase : {'P': [...], 'S': [...]}.
+
+    both_phases=True : chaque station pointée doit avoir ses grilles P et S,
+    même si une seule phase y est pointée (scrtdd peut calculer des temps
+    théoriques pour l'autre phase, en corrélation croisée).
+    """
     used = stations_used(obs_path)
+    if both_phases:
+        pointed = set().union(*used.values())
+        used = {"P": pointed, "S": pointed}
     missing = {}
     for phase, stations in used.items():
         missing[phase] = sorted(s for s in stations
@@ -413,17 +423,18 @@ def main():
     log(f"LOCSEARCH {' '.join(keyword_values(lines, 'LOCSEARCH'))}", 1)
     log(f"grilles de temps : {grid_root}", 1)
     missing = stations_without_grid(obs_path, grid_root)
+    to_make = stations_without_grid(obs_path, grid_root, both_phases=True)
 
-    if args.grilles and any(missing.values()):
+    if args.grilles and any(to_make.values()):
         if grid_control is None:
             raise SystemExit(f"--grilles : pas de GTFILES dans {profile_dir / f'nll_{args.profil}.in'}")
         log("Grilles de temps manquantes")
-        all_missing = set().union(*missing.values())
+        all_missing = set().union(*to_make.values())
         coords = station_coordinates(config["fetch"]["fdsnws_station_url"], all_missing,
                                      args.debut, args.fin)
         grid2time = Path(cfg["nlloc"]).with_name("Grid2Time")
         start = datetime.now()
-        skipped = make_time_grids(grid_control, missing, coords, grid2time, run_dir)
+        skipped = make_time_grids(grid_control, to_make, coords, grid2time, run_dir)
         log(f"grilles calculées en {(datetime.now() - start).total_seconds():.0f} s", 1)
         for phase, stations in skipped.items():
             if stations:

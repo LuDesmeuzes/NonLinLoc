@@ -140,7 +140,9 @@ Les stations des pointés sans grille de temps dans le profil sont signalées
 copie locale `NLL.<profil>.conf` doit être à jour avec celle du serveur.
 
 **`--grilles`** calcule avant la localisation les grilles de temps
-manquantes (Grid2Time), pour les seules stations pointées sur la période.
+manquantes (Grid2Time), pour les seules stations pointées sur la période,
+en P et en S même si une seule des deux phases y est pointée (scrtdd peut
+avoir besoin de l'autre).
 Les lignes `TRANS`, `GTFILES` (modèle et dossier des grilles), `GTMODE` et
 `GT_PLFD` sont lues dans `<profil>/nll_<profil>.in`. Les positions des
 stations viennent de l'inventaire SeisComP (`fetch.fdsnws_station_url`),
@@ -225,8 +227,7 @@ scrtdd --reloc-catalog station.csv,event.csv,phase.csv --profile <profil> --cons
 - Si le profil scrtdd calcule les temps de trajet avec les grilles NLL
   (plugin `tttnll`), copier aussi `model/` et `time/` du profil NLL : il faut
   des grilles P **et** S pour toutes les stations de `station.csv`, y compris
-  celles où une seule phase est pointée (`nll_run.py --grilles` ne calcule
-  que les phases pointées : compléter avec Grid2Time).
+  celles où une seule phase est pointée (`nll_run.py --grilles` les calcule).
 - Ajouter `-I sdsarchive:///<archive SDS>` si les formes d'onde de la région
   ne sont pas dans le recordstream par défaut du serveur (corrélation
   croisée) ; le log l'indique (« waveforms … not available »).
