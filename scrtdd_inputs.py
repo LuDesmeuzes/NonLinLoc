@@ -256,7 +256,12 @@ def main():
                         "networkCode": net, "stationCode": sta, "locationCode": loc})
     log(f"{len(st_rows)} stations", 1)
     if unknown:
-        log(f"⚠ absentes de l'inventaire (phases inutilisables) : {', '.join(unknown)}", 1)
+        # scrtdd refuse tout le catalogue si une phase cite une station absente
+        # de station.csv (« unknown station ») : ces phases sont retirées
+        n_before = len(ph_rows)
+        ph_rows = [r for r in ph_rows if (r["networkCode"], r["stationCode"]) in inv]
+        log(f"⚠ absentes de l'inventaire : {', '.join(unknown)} → "
+            f"{n_before - len(ph_rows)} phases retirées", 1)
 
     write_csv(out_dir / "station.csv", STATION_COLUMNS, st_rows)
     write_csv(out_dir / "event.csv", EVENT_COLUMNS, ev_rows)

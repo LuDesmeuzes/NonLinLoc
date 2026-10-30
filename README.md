@@ -196,7 +196,9 @@ Dans `<run>/scrtdd/` :
   `id` scrtdd = 1, 2, … dans l'ordre chronologique ;
 - `phase.csv` : les pointés de l'origine de référence, relus dans les XML du
   cache de `fetch_picks.py` (codes réseau, location et canal, nécessaires à
-  la corrélation croisée), sans les stations exclues du run ;
+  la corrélation croisée), sans les stations exclues du run ni celles
+  absentes de l'inventaire (scrtdd refuse le catalogue entier pour une
+  seule phase à station inconnue) ;
 - `station.csv` : positions de l'inventaire SeisComP, valides sur la
   période ;
 - `eventlist_<run>.csv` : `origin,event` dans l'ordre des `id`, pour que
@@ -219,6 +221,17 @@ selon la version) :
 ```bash
 scrtdd --reloc-catalog station.csv,event.csv,phase.csv --profile <profil> --console=1 -v
 ```
+
+- Si le profil scrtdd calcule les temps de trajet avec les grilles NLL
+  (plugin `tttnll`), copier aussi `model/` et `time/` du profil NLL : il faut
+  des grilles P **et** S pour toutes les stations de `station.csv`, y compris
+  celles où une seule phase est pointée (`nll_run.py --grilles` ne calcule
+  que les phases pointées : compléter avec Grid2Time).
+- Ajouter `-I sdsarchive:///<archive SDS>` si les formes d'onde de la région
+  ne sont pas dans le recordstream par défaut du serveur (corrélation
+  croisée) ; le log l'indique (« waveforms … not available »).
+- Les formes d'onde téléchargées restent en cache : une relance sur les mêmes
+  événements est beaucoup plus rapide (Ambert : 7 min → 17 s de corrélation).
 
 Rapatrier ensuite les sorties de scrtdd (`reloc-event.csv`,
 `reloc-phase.csv`…) dans le même dossier : les scripts `dd_*` de
